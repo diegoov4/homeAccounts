@@ -1,0 +1,17 @@
+# Configuración de Cloudflare Workers + D1
+name = "gastos-casa"
+main = "src/worker.js"
+compatibility_date = "2025-09-01"
+
+# Archivos estáticos de la app (HTML, CSS, JS, iconos)
+[assets]
+directory = "./public"
+binding = "ASSETS"
+
+# Base de datos D1. Crea la base con:  npx wrangler d1 create gastos-casa
+# y pega aquí el database_id que te devuelve.
+[[d1_databases]]
+binding = "DB"
+database_name = "gastos-casa"
+database_id = "00000000-0000-0000-0000-000000000000"
+migrations_dir = "migrations"

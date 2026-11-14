@@ -1,0 +1,25 @@
+{
+  "name": "gastos-casa",
+  "version": "1.0.0",
+  "description": "Gestor de gastos familiares (Cloudflare Workers + D1)",
+  "scripts": {
+    "dev": "wrangler dev",
+    "deploy": "wrangler deploy",
+    "db:create": "wrangler d1 create gastos-casa",
+    "db:migrate:local": "wrangler d1 migrations apply gastos-casa --local",
+    "db:migrate": "wrangler d1 migrations apply gastos-casa --remote",
+    "secret": "wrangler secret put FAMILY_KEY"
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/diegoov4/homeAccounts.git"
+  },
+  "bugs": {
+    "url": "https://github.com/diegoov4/homeAccounts/issues"
+  },
+  "homepage": "https://github.com/diegoov4/homeAccounts#readme",
+  "devDependencies": {
+    "wrangler": "^4.162.0"
+  },
+  "private": true
+}

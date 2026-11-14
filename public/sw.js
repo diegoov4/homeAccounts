@@ -1,5 +1,5 @@
 /* Service worker: permite usar la app sin conexión. Sube la versión al cambiar archivos. */
-const CACHE = 'gastos-casa-v1';
+const CACHE = 'gastos-casa-v2';
 const ASSETS = ['./', 'index.html', 'css/styles.css', 'js/app.js', 'manifest.webmanifest', 'icons/icon.svg', 'icons/icon-192.png', 'icons/icon-512.png'];
 
 self.addEventListener('install', (e) => {
@@ -10,7 +10,9 @@ self.addEventListener('activate', (e) => {
 });
 // Red primero (para recibir actualizaciones), caché si no hay conexión.
 self.addEventListener('fetch', (e) => {
-  if (e.request.method !== 'GET' || new URL(e.request.url).origin !== location.origin) return;
+  const url = new URL(e.request.url);
+  // La API nunca se cachea: los datos siempre vienen de D1.
+  if (e.request.method !== 'GET' || url.origin !== location.origin || url.pathname.startsWith('/api/')) return;
   e.respondWith(
     fetch(e.request)
       .then((res) => { const copy = res.clone(); caches.open(CACHE).then((c) => c.put(e.request, copy)); return res; })
