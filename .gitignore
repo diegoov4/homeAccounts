@@ -4,3 +4,9 @@ node_modules/
 .DS_Store
 *.log
 src/static-files.generated.js
+# Extractos del banco y archivos de revisión: datos personales, nunca al repositorio
+*.xlsx
+*.xls
+*.csv
+*.revision.csv
+bancos/

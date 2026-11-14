@@ -76,11 +76,30 @@ npm run db:migrate:local            # base de datos D1 local
 npm run dev                         # http://localhost:8787
 ```
 
+## Importar extractos del banco
+
+`scripts/bank_import.py` lee extractos en Excel (`.xlsx`, `.xls`, también los `.xls` que en realidad son HTML) o CSV, detecta la tabla de movimientos, clasifica cada uno y genera un **CSV de revisión** antes de tocar la base de datos.
+
+```bash
+pip install -r scripts/requirements.txt
+npm run bank -- inspect extracto.xlsx                       # qué hay en el archivo
+npm run bank -- prepare extracto.xlsx --account personal --member mama \
+                --common-hint "ES99 9999" --out revision.csv --remote   # clasificar
+npm run bank -- apply revision.csv --remote                 # importar las filas con incluir=si
+```
+
+- **Cuenta personal** (`--account personal --member <id>`): las transferencias a la cuenta común (las que contienen el texto de `--common-hint`) son **aportaciones**; los demás cargos son **gastos pagados por su cuenta**; los abonos (nómina…) se ignoran.
+- **Cuenta común** (`--account comun`): los abonos son ingresos (aportación si el concepto nombra a un miembro) y los cargos, gastos pagados desde la cuenta común.
+- Lo dudoso (sin categoría, Bizum/transferencias, posibles duplicados) queda con `incluir=no` y un aviso para revisarlo.
+- Detecta duplicados con lo apuntado a mano y **entre extractos** (la transferencia a la cuenta común aparece en los dos), y reimportar el mismo extracto no duplica nada.
+- Las reglas de categorías están en `scripts/bank_rules.json`. Los extractos nunca se guardan en el repositorio.
+
 ## Pruebas automáticas
 
 ```bash
 npm test             # pruebas de extremo a extremo: Worker local + D1 vacía + Google simulado + navegador
 npm run test:smoke   # pruebas rápidas contra la app publicada
+npm run test:bank    # pruebas del importador de extractos
 npm run release      # pruebas → migraciones en D1 → despliegue → pruebas de la app publicada
 ```
 
@@ -110,7 +129,7 @@ public/               App web (HTML, CSS, JS, iconos, PWA)
 src/worker.js         Worker de Cloudflare: API
 src/auth.js           Inicio de sesión con Google y sesiones
 src/static.js         Sirve los archivos de public/ (se incluyen dentro del Worker)
-scripts/              embed-static.mjs: empaqueta public/ antes de cada deploy/dev
+scripts/              embed-static.mjs (empaqueta public/) e importador de extractos del banco
 tests/                Pruebas automáticas (e2e y smoke)
 migrations/           Esquema y datos iniciales de D1
 wrangler.toml         Configuración de Cloudflare
