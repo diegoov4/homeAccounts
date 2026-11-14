@@ -385,3 +385,5 @@ body.locked .tabbar { display: none; }
 .me img { width: 38px; height: 38px; border-radius: 50%; flex: 0 0 auto; }
 .me .s-sub { overflow: hidden; text-overflow: ellipsis; }
 .tag.me-tag { background: var(--accent-soft); color: var(--accent); vertical-align: middle; }
+.warn-txt { color: var(--warn); }
+.amount.warn-txt { color: var(--warn); }

@@ -54,10 +54,14 @@ function vExpense(b, id) {
   };
 }
 function vIncome(b, id) {
+  const kind = b.kind === 'withdrawal' ? 'withdrawal' : 'income';
+  const member = vOptId(b.member_id, 'miembro');
+  if (kind === 'withdrawal' && !member) bad('Una retirada personal necesita un miembro');
   return {
     id: vId(id ?? b.id),
+    kind,
     amount: vCents(b.amount),
-    member_id: vOptId(b.member_id, 'miembro'),
+    member_id: member,
     date: vDate(b.date),
     note: vText(b.note, 120, 'nota'),
     created_at: vInt(b.created_at, Date.now()),
@@ -92,9 +96,9 @@ const UPSERT = {
   expenses: `INSERT INTO expenses (id, amount, category_id, date, note, paid_by, reimbursed, created_at)
              VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8)
              ON CONFLICT(id) DO UPDATE SET amount=?2, category_id=?3, date=?4, note=?5, paid_by=?6, reimbursed=?7`,
-  incomes: `INSERT INTO incomes (id, amount, member_id, date, note, created_at)
-            VALUES (?1, ?2, ?3, ?4, ?5, ?6)
-            ON CONFLICT(id) DO UPDATE SET amount=?2, member_id=?3, date=?4, note=?5`,
+  incomes: `INSERT INTO incomes (id, amount, member_id, date, note, created_at, kind)
+            VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7)
+            ON CONFLICT(id) DO UPDATE SET amount=?2, member_id=?3, date=?4, note=?5, kind=?7`,
   categories: `INSERT INTO categories (id, name, icon, color, grp, budget, sort)
                VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7)
                ON CONFLICT(id) DO UPDATE SET name=?2, icon=?3, color=?4, grp=?5, budget=?6, sort=?7`,
@@ -104,7 +108,7 @@ const UPSERT = {
 };
 const COLS = {
   expenses: ['id', 'amount', 'category_id', 'date', 'note', 'paid_by', 'reimbursed', 'created_at'],
-  incomes: ['id', 'amount', 'member_id', 'date', 'note', 'created_at'],
+  incomes: ['id', 'amount', 'member_id', 'date', 'note', 'created_at', 'kind'],
   categories: ['id', 'name', 'icon', 'color', 'grp', 'budget', 'sort'],
   members: ['id', 'name', 'monthly_contribution', 'sort', 'email'],
 };

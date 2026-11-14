@@ -40,7 +40,7 @@ RULES = json.loads((ROOT / 'scripts' / 'bank_rules.json').read_text(encoding='ut
 DB = 'gastos-casa'
 
 REVIEW_COLS = ['incluir', 'tipo', 'fecha', 'importe', 'categoria', 'miembro', 'devuelto', 'nota', 'concepto_banco', 'aviso', 'id']
-TIPOS = {'gasto', 'aportacion', 'ingreso', 'ignorar'}
+TIPOS = {'gasto', 'aportacion', 'ingreso', 'retirada', 'ignorar'}  # retirada = dinero personal que sale de la cuenta común
 
 
 # ---------------------------------------------------------------- utilidades
@@ -275,6 +275,8 @@ def mark_duplicates(rows, existing_exp, existing_inc, days=3):
             continue
         if r['incluir'] != 'si' or r['tipo'] == 'ignorar':
             continue
+        if r['tipo'] == 'retirada':
+            continue
         kind = 'gasto' if r['tipo'] == 'gasto' else 'ingreso'
         d, cents, who = parse_date(r['fecha']), round(float(r['importe']) * 100), r['miembro']
         match = next((x for x in pool[kind] if x[1] == cents and abs((x[0] - d).days) <= days and (kind == 'gasto' or not who or not x[2] or x[2] == who)), None)
@@ -378,11 +380,12 @@ def cmd_apply(a):
             stmts.append(f"INSERT OR IGNORE INTO expenses (id, amount, category_id, date, note, paid_by, reimbursed, created_at) VALUES "
                          f"({sql_str(r['id'])}, {cents}, {sql_str(cat)}, '{date}', {sql_str(note)}, {sql_str(member) if member else 'NULL'}, {reimb}, {now + n})")
         else:
-            if tipo == 'aportacion' and not member:
-                errors.append(f'fila {n}: una aportación necesita miembro')
+            if tipo in ('aportacion', 'retirada') and not member:
+                errors.append(f'fila {n}: una {tipo} necesita miembro')
                 continue
-            stmts.append(f"INSERT OR IGNORE INTO incomes (id, amount, member_id, date, note, created_at) VALUES "
-                         f"({sql_str(r['id'])}, {cents}, {sql_str(member) if member else 'NULL'}, '{date}', {sql_str(note)}, {now + n})")
+            kind = 'withdrawal' if tipo == 'retirada' else 'income'
+            stmts.append(f"INSERT OR IGNORE INTO incomes (id, amount, member_id, date, note, created_at, kind) VALUES "
+                         f"({sql_str(r['id'])}, {cents}, {sql_str(member) if member else 'NULL'}, '{date}', {sql_str(note)}, {now + n}, '{kind}')")
     if errors:
         print('❌ Hay errores; no se ha importado nada:\n  ' + '\n  '.join(errors))
         sys.exit(1)

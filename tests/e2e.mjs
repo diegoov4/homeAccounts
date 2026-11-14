@@ -78,6 +78,12 @@ try {
   await ana.fill('#f-amount', '150'); await ana.fill('#f-note', 'Ingreso e2e'); await ana.click('button[type=submit]'); await sleep(500);
   check('ingreso guardado', (await api(ana, 'GET', '/data')).body.incomes.some((i) => i.note === 'Ingreso e2e' && i.amount === 15000));
 
+  await ana.click('#fab-add'); await ana.click('[data-switch=withdrawal]'); await ana.click('[data-who=papa]');
+  await ana.fill('#f-amount', '500'); await ana.fill('#f-note', 'Retirada e2e'); await ana.click('button[type=submit]'); await sleep(500);
+  const wd = (await api(ana, 'GET', '/data')).body.incomes.find((i) => i.note === 'Retirada e2e');
+  check('retirada personal guardada', wd && wd.kind === 'withdrawal' && wd.member_id === 'papa' && wd.amount === 50000);
+  check('retirada sin miembro rechazada', (await api(ana, 'PUT', '/incomes/wd2', { kind: 'withdrawal', amount: 100, date: '2026-01-01' })).status === 400);
+
   console.log('▶ Cuenta común');
   await ana.click('.tab[data-view=cuenta]'); await sleep(300);
   check('muestra si llega o no', await ana.locator('.verdict .pill').count() === 1);

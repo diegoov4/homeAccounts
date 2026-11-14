@@ -42,6 +42,7 @@
   const COLORS = ['#2563eb', '#0ea5e9', '#14b8a6', '#16a34a', '#65a30d', '#eab308', '#f59e0b', '#f97316', '#e11d48', '#ec4899', '#c026d3', '#7c3aed', '#8b5cf6', '#0f766e', '#64748b', '#a16207', '#78716c'];
   const CURRENCIES = [['EUR', 'Euro (€)'], ['USD', 'Dólar ($)'], ['GBP', 'Libra (£)'], ['MXN', 'Peso mexicano'], ['ARS', 'Peso argentino'], ['COP', 'Peso colombiano'], ['CLP', 'Peso chileno']];
   const INCOME_COLOR = '#16a34a';
+  const WITHDRAWAL_COLOR = '#d97706';
 
   // ---------------------------------------------------------------- modelo (euros en el cliente, céntimos en la API)
   const emptyData = () => ({ me: null, settings: { currency: 'EUR', initialBalance: 0 }, members: [], categories: DEFAULT_CATEGORIES.map((c) => ({ ...c })), expenses: [], incomes: [] });
@@ -53,13 +54,13 @@
       members: (d.members || []).map((m) => ({ id: m.id, name: m.name, email: m.email || '', monthly: m.monthly_contribution / 100, sort: m.sort })),
       categories: (d.categories || []).map((c) => ({ id: c.id, name: c.name, icon: c.icon, color: c.color, group: c.grp, budget: c.budget / 100, sort: c.sort })),
       expenses: (d.expenses || []).map((e) => ({ id: e.id, amount: e.amount / 100, categoryId: e.category_id, date: e.date, note: e.note, paidBy: e.paid_by || '', reimbursed: Boolean(e.reimbursed), createdAt: e.created_at })),
-      incomes: (d.incomes || []).map((i) => ({ id: i.id, amount: i.amount / 100, memberId: i.member_id || '', date: i.date, note: i.note, createdAt: i.created_at })),
+      incomes: (d.incomes || []).map((i) => ({ id: i.id, kind: i.kind === 'withdrawal' ? 'withdrawal' : 'income', amount: i.amount / 100, memberId: i.member_id || '', date: i.date, note: i.note, createdAt: i.created_at })),
     };
   }
   const apiMember = (m) => ({ id: m.id, name: m.name, email: m.email || '', monthly_contribution: toCents(m.monthly || 0), sort: m.sort || 0 });
   const apiCategory = (c) => ({ id: c.id, name: c.name, icon: c.icon, color: c.color, grp: c.group, budget: toCents(c.budget || 0), sort: c.sort || 0 });
   const apiExpense = (e) => ({ id: e.id, amount: toCents(e.amount), category_id: e.categoryId, date: e.date, note: e.note, paid_by: e.paidBy || null, reimbursed: e.reimbursed ? 1 : 0, created_at: e.createdAt });
-  const apiIncome = (i) => ({ id: i.id, amount: toCents(i.amount), member_id: i.memberId || null, date: i.date, note: i.note, created_at: i.createdAt });
+  const apiIncome = (i) => ({ id: i.id, kind: i.kind || 'income', amount: toCents(i.amount), member_id: i.memberId || null, date: i.date, note: i.note, created_at: i.createdAt });
   const toApi = (d) => ({
     app: 'gastos-casa', version: 2,
     settings: { currency: d.settings.currency, initial_balance: toCents(d.settings.initialBalance || 0) },
@@ -217,28 +218,36 @@
     render();
   }
   const isFromCommon = (e) => !e.paidBy || e.reimbursed;
+  // Retirada personal: dinero que sale de la cuenta común para un miembro. Resta de lo aportado.
+  const isWithdrawal = (i) => i.kind === 'withdrawal';
+  const signed = (i) => (isWithdrawal(i) ? -i.amount : i.amount);
+  const netSum = (list) => round2(list.reduce((a, i) => a + signed(i), 0));
 
   // Resumen de la cuenta común en un periodo.
   function accountStats(key) {
     const inc = inPeriod(data.incomes, key);
     const exp = inPeriod(data.expenses, key);
-    const contributed = sum(inc);
+    const contributed = netSum(inc); // neto: ingresos − retiradas personales
+    const withdrawn = sum(inc.filter(isWithdrawal));
     const familyTotal = sum(exp);
     const members = data.members.map((m) => {
-      const contrib = sum(inc.filter((i) => i.memberId === m.id));
+      const mine = inc.filter((i) => i.memberId === m.id);
+      const gross = sum(mine.filter((i) => !isWithdrawal(i)));
+      const out = sum(mine.filter(isWithdrawal));
+      const contrib = round2(gross - out);
       const personal = sum(exp.filter((e) => e.paidBy === m.id && !e.reimbursed));
-      return { m, contrib, personal, total: round2(contrib + personal) };
+      return { m, gross, out, contrib, personal, total: round2(contrib + personal) };
     });
     return {
-      contributed, familyTotal,
+      contributed, withdrawn, familyTotal,
       diff: round2(contributed - familyTotal),
       fromCommon: sum(exp.filter(isFromCommon)),
       paidPersonally: sum(exp.filter((e) => e.paidBy)),
-      otherIncome: sum(inc.filter((i) => !i.memberId)),
+      otherIncome: sum(inc.filter((i) => !i.memberId && !isWithdrawal(i))),
       members,
     };
   }
-  const commonBalance = () => round2((data.settings.initialBalance || 0) + sum(data.incomes) - sum(data.expenses.filter(isFromCommon)));
+  const commonBalance = () => round2((data.settings.initialBalance || 0) + netSum(data.incomes) - sum(data.expenses.filter(isFromCommon)));
   const pendingByMember = () => data.members
     .map((m) => { const list = data.expenses.filter((e) => e.paidBy === m.id && !e.reimbursed); return { m, total: sum(list), count: list.length }; })
     .filter((p) => p.total > 0);
@@ -494,7 +503,7 @@
   }
   function flowChart() {
     const cols = trendCols();
-    cols.forEach((c) => { c.inc = sum(inPeriod(data.incomes, c.key)); c.exp = sum(inPeriod(data.expenses, c.key)); });
+    cols.forEach((c) => { c.inc = netSum(inPeriod(data.incomes, c.key)); c.exp = sum(inPeriod(data.expenses, c.key)); });
     const max = Math.max(1, ...cols.map((c) => Math.max(c.inc, c.exp)));
     return `
       <div class="trend flow">${cols.map((c) => `
@@ -526,7 +535,7 @@
     const avg = avgMonthlyExpenses(3);
     const monthKey = periodKey('month', now.getFullYear(), now.getMonth());
     const missing = ui.mode === 'month' && isCurrentPeriod()
-      ? data.members.filter((m) => m.monthly > 0 && !data.incomes.some((i) => i.memberId === m.id && i.date.startsWith(monthKey)))
+      ? data.members.filter((m) => m.monthly > 0 && !data.incomes.some((i) => !isWithdrawal(i) && i.memberId === m.id && i.date.startsWith(monthKey)))
       : [];
 
     // previsión del mes en curso
@@ -556,8 +565,8 @@
         </section>`;
     }
 
-    const maxMember = Math.max(1, ...s.members.map((x) => x.total));
-    const totalMembers = s.members.reduce((a, x) => a + x.total, 0);
+    const maxMember = Math.max(1, ...s.members.map((x) => Math.max(0, x.contrib) + x.personal));
+    const totalMembers = s.members.reduce((a, x) => a + Math.max(0, x.total), 0);
 
     main.innerHTML = `
       ${periodSelector()}
@@ -576,6 +585,7 @@
         </div>
         <div class="vs-bar"><i style="width:${s.contributed || s.familyTotal ? Math.min(100, (s.familyTotal / Math.max(s.contributed, s.familyTotal)) * 100) : 0}%" class="${s.diff < 0 ? 'over' : ''}"></i></div>
         <div class="verdict-line">${s.contributed || s.familyTotal ? verdictPill(s.diff) : '<span class="faint">Sin movimientos en este periodo</span>'}</div>
+        ${s.withdrawn ? `<p class="faint" style="margin:10px 0 0;font-size:13px">Aportado neto: ${money(round2(s.contributed + s.withdrawn))} ingresado − ${money(s.withdrawn)} de retiradas personales.</p>` : ''}
         ${s.paidPersonally ? `<p class="faint" style="margin:10px 0 0;font-size:13px">Incluye ${money(s.paidPersonally)} que alguien pagó por su cuenta.</p>` : ''}
         ${forecast}
       </section>
@@ -610,12 +620,12 @@
             <span class="avatar">${esc(x.m.name.slice(0, 1).toUpperCase())}</span>
             <span class="row-main">
               <span class="row-top"><span class="row-title">${esc(x.m.name)}</span><span class="amount">${money(x.total)}</span></span>
-              <span class="stack"><i class="inc" style="width:${(x.contrib / maxMember) * 100}%"></i><i class="per" style="width:${(x.personal / maxMember) * 100}%"></i></span>
-              <span class="row-meta"><span>Cuenta ${money(x.contrib, { noCents: true })}${x.personal ? ` · Por su cuenta ${money(x.personal, { noCents: true })}` : ''}</span><span>${totalMembers ? Math.round((x.total / totalMembers) * 100) : 0}%</span></span>
+              <span class="stack"><i class="inc" style="width:${(Math.max(0, x.contrib) / maxMember) * 100}%"></i><i class="per" style="width:${(x.personal / maxMember) * 100}%"></i></span>
+              <span class="row-meta"><span>Cuenta ${money(x.contrib, { noCents: true })}${x.out ? ` (${money(x.gross, { noCents: true })} − ${money(x.out, { noCents: true })} personal)` : ''}${x.personal ? ` · Por su cuenta ${money(x.personal, { noCents: true })}` : ''}</span><span>${totalMembers > 0 ? Math.round((Math.max(0, x.total) / totalMembers) * 100) : 0}%</span></span>
             </span>
           </div>`).join('')}</div>
         ${s.otherIncome ? `<p class="faint" style="margin:8px 0 0;font-size:13px">Otros ingresos: ${money(s.otherIncome)}</p>` : ''}
-        <div class="flow-legend"><span><i class="inc"></i>Aportado a la cuenta</span><span><i class="per"></i>Pagado por su cuenta (sin devolver)</span></div>
+        <div class="flow-legend"><span><i class="inc"></i>Aportado a la cuenta (neto de retiradas)</span><span><i class="per"></i>Pagado por su cuenta (sin devolver)</span></div>
       </section>
 
       ${recommend}
@@ -658,6 +668,16 @@
       </button>`;
   }
   function incomeRow(i) {
+    if (isWithdrawal(i)) {
+      return `
+      <button class="row" data-inc="${esc(i.id)}" style="--c:${WITHDRAWAL_COLOR}">
+        <span class="cat-icon sm">👛</span>
+        <span class="row-main">
+          <span class="row-top"><span class="row-title">Retirada personal de ${esc(memberName(i.memberId))}</span><span class="amount warn-txt">${money(-i.amount)}</span></span>
+          <span class="row-sub">${esc(i.note || 'Sale de la cuenta común para uso personal')}</span>
+        </span>
+      </button>`;
+    }
     return `
       <button class="row" data-inc="${esc(i.id)}" style="--c:${INCOME_COLOR}">
         <span class="cat-icon sm">💶</span>
@@ -680,7 +700,7 @@
     if (ui.filterCat) exps = exps.filter((e) => e.categoryId === ui.filterCat);
     if (q) {
       exps = exps.filter((e) => { const c = catById(e.categoryId); return [e.note, e.paidBy && memberName(e.paidBy), c.name, c.group, String(e.amount).replace('.', ',')].join(' ').toLowerCase().includes(q); });
-      incs = incs.filter((i) => [i.note, i.memberId ? memberName(i.memberId) : 'otro ingreso', 'aportación', String(i.amount).replace('.', ',')].join(' ').toLowerCase().includes(q));
+      incs = incs.filter((i) => [i.note, i.memberId ? memberName(i.memberId) : 'otro ingreso', isWithdrawal(i) ? 'retirada personal' : 'aportación ingreso', String(i.amount).replace('.', ',')].join(' ').toLowerCase().includes(q));
     }
     const all = [...exps.map((x) => ({ t: 'e', x, date: x.date, createdAt: x.createdAt })), ...incs.map((x) => ({ t: 'i', x, date: x.date, createdAt: x.createdAt }))].sort(sortByDate);
     const days = new Map();
@@ -691,8 +711,8 @@
     const filtered = ui.filterCat || q || ui.filterType !== 'all';
     const dayTotals = (items) => {
       const e = sum(items.filter((r) => r.t === 'e').map((r) => r.x));
-      const i = sum(items.filter((r) => r.t === 'i').map((r) => r.x));
-      return [i ? `<span class="good-txt">${money(i, { sign: true })}</span>` : '', e ? money(-e) : ''].filter(Boolean).join(' · ');
+      const i = netSum(items.filter((r) => r.t === 'i').map((r) => r.x));
+      return [i ? `<span class="${i > 0 ? 'good-txt' : 'warn-txt'}">${money(i, { sign: true })}</span>` : '', e ? money(-e) : ''].filter(Boolean).join(' · ');
     };
 
     main.innerHTML = `
@@ -707,7 +727,7 @@
           ${chipCats.map((c) => `<button class="chip ${ui.filterCat === c.id ? 'on' : ''}" data-filter="${esc(c.id)}">${c.icon} ${esc(c.name)}</button>`).join('')}
         </div>` : ''}
       </div>
-      ${filtered && all.length ? `<div class="filter-total"><span>${filterCat ? `${filterCat.icon} ${esc(filterCat.name)}` : 'Total'} · ${all.length}</span><span>${incs.length ? money(sum(incs), { sign: true }) : ''}${incs.length && exps.length ? ' · ' : ''}${exps.length ? money(-sum(exps)) : ''}</span></div>` : ''}
+      ${filtered && all.length ? `<div class="filter-total"><span>${filterCat ? `${filterCat.icon} ${esc(filterCat.name)}` : 'Total'} · ${all.length}</span><span>${incs.length ? money(netSum(incs), { sign: true }) : ''}${incs.length && exps.length ? ' · ' : ''}${exps.length ? money(-sum(exps)) : ''}</span></div>` : ''}
       ${all.length ? [...days.entries()].map(([date, items]) => `
         <div class="day-head"><span>${esc(dayLabel(date))}</span><span>${dayTotals(items)}</span></div>
         <div class="card list-card"><div class="rows">${items.map((r) => (r.t === 'e' ? expenseRow(r.x) : incomeRow(r.x))).join('')}</div></div>
@@ -892,11 +912,12 @@
     <div class="seg wide" style="margin-bottom:6px">
       <button type="button" data-switch="expense" class="${active === 'expense' ? 'on' : ''}">💸 Gasto</button>
       <button type="button" data-switch="income" class="${active === 'income' ? 'on' : ''}">💶 Ingreso</button>
+      ${data.members.length ? `<button type="button" data-switch="withdrawal" class="${active === 'withdrawal' ? 'on' : ''}">👛 Retirada</button>` : ''}
     </div>`;
   function bindTypeSwitch(root) {
     $$('[data-switch]', root).forEach((b) => b.addEventListener('click', () => {
       const amount = $('#f-amount', root).value;
-      if (b.dataset.switch === 'income') openIncomeForm(null, amount); else openExpenseForm(null, '', amount);
+      if (b.dataset.switch === 'income' || b.dataset.switch === 'withdrawal') openIncomeForm(null, amount, b.dataset.switch); else openExpenseForm(null, '', amount);
     }));
   }
   const amountField = (value) => `
@@ -985,32 +1006,36 @@
     });
   }
 
-  function openIncomeForm(inc = null, presetAmount = '') {
+  // kind: 'income' (ingreso/aportación) o 'withdrawal' (retirada personal)
+  function openIncomeForm(inc = null, presetAmount = '', kind = 'income') {
     const editing = Boolean(inc);
+    if (inc) kind = inc.kind || 'income';
+    const out = kind === 'withdrawal';
     const mine = data.members.find(isMe);
     let memberId = inc ? inc.memberId : (data.members.length ? ((mine && mine.id) || lsGet(LS + ':lastIncomeMember') || data.members[0].id) : '');
     if (memberId && !memberById(memberId)) memberId = data.members[0] ? data.members[0].id : '';
-    const fill = !inc && !presetAmount && memberId ? (memberById(memberId).monthly || '') : '';
+    const fill = !inc && !presetAmount && !out && memberId ? (memberById(memberId).monthly || '') : '';
 
     openSheet(`
-      ${editing ? '<h2 id="sheet-title">Editar ingreso</h2>' : typeSwitch('income')}
+      ${editing ? `<h2 id="sheet-title">${out ? 'Editar retirada personal' : 'Editar ingreso'}</h2>` : typeSwitch(kind)}
       <form id="inc-form" autocomplete="off">
         ${amountField(inc ? String(inc.amount).replace('.', ',') : presetAmount || (fill ? String(fill).replace('.', ',') : ''))}
+        ${out ? '<p class="faint" style="font-size:13px;margin:-6px 0 12px;text-align:center">Dinero que sale de la cuenta común para uso personal (su parte de la nómina, ahorro propio…). No cuenta como gasto de la familia: resta de lo que aporta.</p>' : ''}
         <div class="field">
-          <span class="field-label">¿Quién ingresa en la cuenta común?</span>
+          <span class="field-label">${out ? '¿Para quién?' : '¿Quién ingresa en la cuenta común?'}</span>
           <div class="chips wrap">
             ${data.members.map((m) => `<button type="button" class="chip ${memberId === m.id ? 'on' : ''}" data-who="${esc(m.id)}">👤 ${esc(m.name)}</button>`).join('')}
-            <button type="button" class="chip ${!memberId ? 'on' : ''}" data-who="">➕ Otro ingreso</button>
+            ${out ? '' : `<button type="button" class="chip ${!memberId ? 'on' : ''}" data-who="">➕ Otro ingreso</button>`}
           </div>
           ${!data.members.length ? '<p class="faint" style="font-size:13px">Consejo: añade a los miembros de la familia en Ajustes.</p>' : ''}
         </div>
         <div class="two">
           <div class="field"><label for="f-date">Fecha</label><input class="input" type="date" id="f-date" value="${inc ? inc.date : todayISO()}" required></div>
-          <div class="field"><label for="f-note">Nota</label><input class="input" id="f-note" placeholder="Ej.: aportación mensual" maxlength="120" value="${esc(inc ? inc.note : '')}"></div>
+          <div class="field"><label for="f-note">Nota</label><input class="input" id="f-note" placeholder="${out ? 'Ej.: parte personal de la nómina' : 'Ej.: aportación mensual'}" maxlength="120" value="${esc(inc ? inc.note : '')}"></div>
         </div>
         <div class="btn-row" style="margin-top:6px">
           ${editing ? '<button type="button" class="btn danger" data-act="delete">🗑️ Borrar</button>' : '<button type="button" class="btn" data-close>Cancelar</button>'}
-          <button type="submit" class="btn primary">${editing ? 'Guardar cambios' : 'Añadir ingreso'}</button>
+          <button type="submit" class="btn primary">${editing ? 'Guardar cambios' : out ? 'Añadir retirada' : 'Añadir ingreso'}</button>
         </div>
       </form>`, (root) => {
       const amount = bindAmount(root);
@@ -1021,25 +1046,26 @@
         memberId = b.dataset.who;
         $$('[data-who]', root).forEach((x) => x.classList.toggle('on', x === b));
         const m = memberById(memberId);
-        if (!editing && (autoFilled || !amount.value)) { amount.value = m && m.monthly ? String(m.monthly).replace('.', ',') : ''; autoFilled = Boolean(amount.value); }
+        if (!editing && !out && (autoFilled || !amount.value)) { amount.value = m && m.monthly ? String(m.monthly).replace('.', ',') : ''; autoFilled = Boolean(amount.value); }
       }));
       const del = $('[data-act=delete]', root);
       if (del) del.onclick = () => {
         const removed = { ...inc };
         closeSheet();
         persist(() => { data.incomes = data.incomes.filter((x) => x.id !== inc.id); }, () => api('DELETE', '/incomes/' + inc.id))
-          .then((ok) => ok && toast('Ingreso borrado', 'Deshacer', () => persist(() => data.incomes.push(removed), () => api('PUT', '/incomes/' + removed.id, apiIncome(removed)))));
+          .then((ok) => ok && toast(out ? 'Retirada borrada' : 'Ingreso borrado', 'Deshacer', () => persist(() => data.incomes.push(removed), () => api('PUT', '/incomes/' + removed.id, apiIncome(removed)))));
       };
       $('#inc-form', root).addEventListener('submit', (ev) => {
         ev.preventDefault();
         const value = parseAmount(amount.value);
         if (!(value > 0)) { amount.focus(); return toast('Escribe un importe'); }
-        const item = { id: inc ? inc.id : uid(), amount: value, memberId, date: $('#f-date', root).value || todayISO(), note: $('#f-note', root).value.trim(), createdAt: inc ? inc.createdAt : Date.now() };
+        if (out && !memberId) return toast('Elige para quién es');
+        const item = { id: inc ? inc.id : uid(), kind, amount: value, memberId, date: $('#f-date', root).value || todayISO(), note: $('#f-note', root).value.trim(), createdAt: inc ? inc.createdAt : Date.now() };
         if (memberId) lsSet(LS + ':lastIncomeMember', memberId);
         closeSheet();
         if (!editing) { const d = parseISO(item.date); ui.year = d.getFullYear(); ui.month = d.getMonth(); }
         persist(() => { if (editing) Object.assign(inc, item); else data.incomes.push(item); }, () => api('PUT', '/incomes/' + item.id, apiIncome(item)))
-          .then((ok) => ok && toast(`💶 ${editing ? 'Ingreso actualizado' : `${money(value, { sign: true })} en la cuenta común`}`));
+          .then((ok) => ok && toast(out ? `👛 ${editing ? 'Retirada actualizada' : `${money(-value)} para ${memberName(memberId)}`}` : `💶 ${editing ? 'Ingreso actualizado' : `${money(value, { sign: true })} en la cuenta común`}`));
       });
     });
   }
@@ -1178,7 +1204,7 @@
     const rows = [['Tipo', 'Fecha', 'Categoría', 'Grupo', 'Importe', 'Nota', 'Pagado / ingresado por', 'Devuelto'].map(q).join(';')];
     const all = [
       ...data.expenses.map((e) => { const c = catById(e.categoryId); return [e.date, ['Gasto', e.date, c.name, c.group, n(-e.amount), e.note, e.paidBy ? memberName(e.paidBy) : 'Cuenta común', e.paidBy ? (e.reimbursed ? 'Sí' : 'No') : '']]; }),
-      ...data.incomes.map((i) => [i.date, ['Ingreso', i.date, '', '', n(i.amount), i.note, i.memberId ? memberName(i.memberId) : 'Otro ingreso', '']]),
+      ...data.incomes.map((i) => [i.date, [isWithdrawal(i) ? 'Retirada personal' : 'Ingreso', i.date, '', '', n(signed(i)), i.note, i.memberId ? memberName(i.memberId) : 'Otro ingreso', '']]),
     ].sort((a, b) => (a[0] < b[0] ? -1 : 1));
     all.forEach(([, r]) => rows.push(r.map(q).join(';')));
     download(`gastos-casa-${todayISO()}.csv`, '﻿' + rows.join('\r\n'), 'text/csv;charset=utf-8');
