@@ -119,7 +119,7 @@ const bindRow = (db, table, row) => db.prepare(UPSERT[table]).bind(...COLS[table
 async function readSettings(db) {
   const { results } = await db.prepare('SELECT key, value FROM settings').all();
   const s = Object.fromEntries(results.map((r) => [r.key, r.value]));
-  return { currency: s.currency || 'EUR', initial_balance: Number(s.initial_balance) || 0 };
+  return { currency: s.currency || 'EUR', initial_balance: Number(s.initial_balance) || 0, contribution_pct: Number(s.contribution_pct) || 0 };
 }
 
 async function readAll(db) {
@@ -147,6 +147,11 @@ function writeSettingsStmts(db, b) {
   if (b.initial_balance !== undefined) {
     const v = vCents(b.initial_balance, 'saldo inicial', { allowZero: true, allowNegative: true });
     stmts.push(db.prepare('INSERT INTO settings (key, value) VALUES (?1, ?2) ON CONFLICT(key) DO UPDATE SET value=?2').bind('initial_balance', String(v)));
+  }
+  if (b.contribution_pct !== undefined) {
+    // % acordado de aportación, en centésimas de punto (55,16 % → 5516)
+    if (!Number.isInteger(b.contribution_pct) || b.contribution_pct < 0 || b.contribution_pct > 10000) bad('porcentaje no válido');
+    stmts.push(db.prepare('INSERT INTO settings (key, value) VALUES (?1, ?2) ON CONFLICT(key) DO UPDATE SET value=?2').bind('contribution_pct', String(b.contribution_pct)));
   }
   return stmts;
 }

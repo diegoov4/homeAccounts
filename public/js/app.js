@@ -45,12 +45,12 @@
   const WITHDRAWAL_COLOR = '#d97706';
 
   // ---------------------------------------------------------------- modelo (euros en el cliente, céntimos en la API)
-  const emptyData = () => ({ me: null, settings: { currency: 'EUR', initialBalance: 0 }, members: [], categories: DEFAULT_CATEGORIES.map((c) => ({ ...c })), expenses: [], incomes: [] });
+  const emptyData = () => ({ me: null, settings: { currency: 'EUR', initialBalance: 0, contributionPct: 0 }, members: [], categories: DEFAULT_CATEGORIES.map((c) => ({ ...c })), expenses: [], incomes: [] });
 
   function fromApi(d) {
     return {
       me: d.me || null,
-      settings: { currency: d.settings?.currency || 'EUR', initialBalance: (d.settings?.initial_balance || 0) / 100 },
+      settings: { currency: d.settings?.currency || 'EUR', initialBalance: (d.settings?.initial_balance || 0) / 100, contributionPct: (d.settings?.contribution_pct || 0) / 100 },
       members: (d.members || []).map((m) => ({ id: m.id, name: m.name, email: m.email || '', monthly: m.monthly_contribution / 100, income: (m.monthly_income || 0) / 100, sort: m.sort })),
       categories: (d.categories || []).map((c) => ({ id: c.id, name: c.name, icon: c.icon, color: c.color, group: c.grp, budget: c.budget / 100, sort: c.sort })),
       expenses: (d.expenses || []).map((e) => ({ id: e.id, amount: e.amount / 100, categoryId: e.category_id, date: e.date, note: e.note, paidBy: e.paid_by || '', reimbursed: Boolean(e.reimbursed), createdAt: e.created_at })),
@@ -63,7 +63,7 @@
   const apiIncome = (i) => ({ id: i.id, kind: i.kind || 'income', amount: toCents(i.amount), member_id: i.memberId || null, date: i.date, note: i.note, created_at: i.createdAt });
   const toApi = (d) => ({
     app: 'gastos-casa', version: 2,
-    settings: { currency: d.settings.currency, initial_balance: toCents(d.settings.initialBalance || 0) },
+    settings: { currency: d.settings.currency, initial_balance: toCents(d.settings.initialBalance || 0), contribution_pct: Math.round((d.settings.contributionPct || 0) * 100) },
     members: d.members.map(apiMember), categories: d.categories.map(apiCategory),
     expenses: d.expenses.map(apiExpense), incomes: d.incomes.map(apiIncome),
   });
@@ -550,7 +550,7 @@
 
     // aportación recomendada
     let recommend = '';
-    if (avg) {
+    if (avg && !((data.settings.contributionPct || 0) > 0 && data.members.every((m) => m.income > 0))) {
       const need = avg.avg;
       // reparto: aportaciones fijas si las hay; si no, la proporción real (neta) de los últimos meses
       const real = data.members.map((m) => avg.keys.reduce((a, k) => a + netSum(inPeriod(data.incomes, k).filter((i) => i.memberId === m.id)), 0));
@@ -583,7 +583,40 @@
 
     // ¿Aportáis el mismo % de vuestros ingresos? (ingresos mensuales × meses del periodo)
     let fairCard = '';
-    if (data.members.length > 1 && data.members.every((m) => m.income > 0)) {
+    const pctDeal = (data.settings.contributionPct || 0) / 100;
+    if (pctDeal > 0 && data.members.length && data.members.every((m) => m.income > 0)) {
+      // media de los últimos 3 meses terminados: evita el desfase de las aportaciones hechas a principios del mes siguiente
+      const keys = [1, 2, 3].map((i) => { const d = new Date(now.getFullYear(), now.getMonth() - i, 1); return periodKey('month', d.getFullYear(), d.getMonth()); });
+      const label = `${MONTHS[parseInt(keys[2].slice(5), 10) - 1]} a ${MONTHS[parseInt(keys[0].slice(5), 10) - 1]}`;
+      const rows = data.members.map((m) => {
+        const real = keys.reduce((a, k) => a + netSum(inPeriod(data.incomes, k).filter((i) => i.memberId === m.id))
+          + sum(inPeriod(data.expenses, k).filter((e) => e.paidBy === m.id && !e.reimbursed)), 0) / keys.length;
+        const target = m.income * pctDeal;
+        return { m, real: round2(real), target: round2(target), gap: round2(real - target), pct: real / m.income };
+      });
+      const totTarget = rows.reduce((a, r) => a + r.target, 0);
+      const avgExp = keys.reduce((a, k) => a + sum(inPeriod(data.expenses, k)), 0) / keys.length;
+      const incomeTotal = data.members.reduce((a, m) => a + m.income, 0);
+      const pctFmt = (v) => (Math.round(v * 10000) / 100).toLocaleString('es-ES') + ' %';
+      fairCard = `
+      <section class="card">
+        <h2>⚖️ Aportación acordada <span class="muted">${pctFmt(pctDeal)} de la nómina</span></h2>
+        <p class="muted" style="margin:-4px 0 12px">Lo que le toca a cada uno según el acuerdo frente a lo que aporta de verdad (cuenta común, neto, más lo pagado de su bolsillo para la casa). Media mensual de ${label}.</p>
+        <div class="rows">${rows.map((r) => `
+          <div class="row static">
+            <span class="avatar">${esc(r.m.name.slice(0, 1).toUpperCase())}</span>
+            <span class="row-main">
+              <span class="row-top"><span class="row-title">${esc(r.m.name)}</span><span class="amount">${money(r.real, { noCents: true })}<span class="faint" style="font-weight:500"> / ${money(r.target, { noCents: true })}</span></span></span>
+              <span class="pct-bar"><i style="width:${Math.min(100, (Math.max(0, r.real) / Math.max(r.target, r.real, 1)) * 100)}%"></i><b style="left:${(r.target / Math.max(r.target, r.real, 1)) * 100}%"></b></span>
+              <span class="row-meta"><span>${pctFmt(r.pct)} de ${money(r.m.income, { noCents: true })}</span><span class="${Math.abs(r.gap) < 5 ? 'good-txt' : r.gap > 0 ? 'good-txt' : 'warn-txt'}">${Math.abs(r.gap) < 5 ? '✓ lo acordado' : r.gap > 0 ? `+${money(r.gap, { noCents: true })}/mes de más` : `${money(-r.gap, { noCents: true })}/mes de menos`}</span></span>
+            </span>
+          </div>`).join('')}</div>
+        <div class="notice ${totTarget >= avgExp ? 'good' : 'bad'}" style="margin-top:10px">${totTarget >= avgExp
+          ? `✅ Con el ${pctFmt(pctDeal)} acordado aportaríais ${money(totTarget, { noCents: true })}/mes, que cubre el gasto medio (${money(avgExp, { noCents: true })}/mes).`
+          : `⚠️ Con el ${pctFmt(pctDeal)} acordado aportaríais ${money(totTarget, { noCents: true })}/mes, pero el gasto medio es de ${money(avgExp, { noCents: true })}/mes. Para cubrirlo, el % debería ser del <b>${pctFmt(avgExp / incomeTotal)}</b>.`}</div>
+        <div class="flow-legend"><span><i class="inc"></i>Lo que aporta</span><span><i class="mark"></i>Lo que le toca según el acuerdo</span></div>
+      </section>`;
+    } else if (data.members.length > 1 && data.members.every((m) => m.income > 0)) {
       // en el año en curso solo se cuentan los meses ya terminados (el actual aún no ha cobrado todo el mundo)
       const partialYear = ui.mode === 'year' && ui.year === now.getFullYear() && now.getMonth() > 0;
       const months = ui.mode === 'month' ? 1 : partialYear ? now.getMonth() : 12;
@@ -864,6 +897,10 @@
           <input class="input" id="initial-balance" inputmode="decimal" style="width:130px;text-align:right" value="${data.settings.initialBalance ? String(data.settings.initialBalance).replace('.', ',') : ''}" placeholder="0,00">
         </div>
         <div class="setting">
+          <div><div class="s-title">% de aportación acordado</div><div class="s-sub">Lo que pone cada uno de su nómina (el mismo % para todos)</div></div>
+          <input class="input" id="contribution-pct" inputmode="decimal" style="width:100px;text-align:right" value="${data.settings.contributionPct ? String(data.settings.contributionPct).replace('.', ',') : ''}" placeholder="Ej.: 55,16">
+        </div>
+        <div class="setting">
           <div><div class="s-title">Moneda</div></div>
           <select class="input" id="currency" style="width:auto">${CURRENCIES.map(([c, n]) => `<option value="${c}" ${data.settings.currency === c ? 'selected' : ''}>${n}</option>`).join('')}</select>
         </div>
@@ -924,6 +961,11 @@
       const v = ev.target.value.trim() === '' ? 0 : parseAmount(ev.target.value.replace(/^(-?)/, '$1'));
       if (Number.isNaN(v)) return toast('Importe no válido');
       persist(() => { data.settings.initialBalance = v; }, () => api('PUT', '/settings', { initial_balance: toCents(v) })).then((ok) => ok && toast('Saldo inicial guardado'));
+    });
+    $('#contribution-pct').addEventListener('change', (ev) => {
+      const v = ev.target.value.trim() === '' ? 0 : parseFloat(ev.target.value.replace('%', '').replace(',', '.'));
+      if (Number.isNaN(v) || v < 0 || v > 100) return toast('Porcentaje no válido');
+      persist(() => { data.settings.contributionPct = round2(v); }, () => api('PUT', '/settings', { contribution_pct: Math.round(v * 100) })).then((ok) => ok && toast('% acordado guardado'));
     });
     $('[data-act=export]', main).onclick = exportJSON;
     $('[data-act=csv]', main).onclick = exportCSV;
