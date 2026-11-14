@@ -10,3 +10,4 @@ src/static-files.generated.js
 *.csv
 *.revision.csv
 bancos/
+__pycache__/
