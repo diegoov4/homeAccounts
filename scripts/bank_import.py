@@ -127,7 +127,7 @@ def _decodes(raw, enc):
 
 
 HEADERS = {
-    'fecha': ['fecha operacion', 'fecha de operacion', 'f. operacion', 'fecha', 'f.operacion', 'date'],
+    'fecha': ['fecha operacion', 'fecha de operacion', 'f. operacion', 'f. operativa', 'fecha operativa', 'f.operativa', 'fecha', 'f.operacion', 'date'],
     'fecha_valor': ['fecha valor', 'f. valor', 'f.valor'],
     'concepto': ['concepto', 'descripcion', 'detalle', 'movimiento', 'observaciones', 'operacion', 'description'],
     'concepto2': ['mas datos', 'informacion adicional', 'referencia', 'beneficiario', 'ordenante', 'comercio'],
