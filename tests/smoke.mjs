@@ -1,5 +1,5 @@
 // Pruebas rápidas contra la app publicada. Uso: npm run test:smoke [-- URL]
-const U = (process.argv[2] || process.env.APP_URL || 'https://gastos-casa.diego-ov4.workers.dev').replace(/\/$/, '');
+const U = (process.argv[2] || process.env.APP_URL || 'https://casitafeliz.diemo.dev').replace(/\/$/, '');
 let failures = 0;
 async function check(name, path, expect) {
   try {

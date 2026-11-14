@@ -3,7 +3,7 @@
   "version": "1.0.0",
   "description": "Gestor de gastos familiares (Cloudflare Workers + D1)",
   "scripts": {
-    "dev": "wrangler dev",
+    "dev": "wrangler dev --local-upstream localhost:8787",
     "deploy": "wrangler deploy",
     "db:create": "wrangler d1 create gastos-casa",
     "db:migrate:local": "wrangler d1 migrations apply gastos-casa --local",

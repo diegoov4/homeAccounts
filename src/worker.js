@@ -250,6 +250,10 @@ async function handleApi(request, env, url) {
 export default {
   async fetch(request, env) {
     const url = new URL(request.url);
+    // *.workers.dev → dominio propio (misma ruta), para usar siempre una sola dirección
+    if (env.CANONICAL_HOST && url.hostname.endsWith('.workers.dev') && url.hostname !== env.CANONICAL_HOST) {
+      return Response.redirect(`https://${env.CANONICAL_HOST}${url.pathname}${url.search}`, 301);
+    }
     if (url.pathname === '/api' || url.pathname.startsWith('/api/')) {
       try {
         return await handleApi(request, env, url);

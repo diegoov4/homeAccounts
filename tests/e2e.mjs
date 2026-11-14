@@ -31,7 +31,7 @@ try {
   console.log('▶ Preparando D1 local y servidores…');
   await wait(run('npx', ['wrangler', 'd1', 'migrations', 'apply', 'gastos-casa', '--local', '--persist-to', state], { quiet: true }));
   run('node', ['tests/mock-google.cjs'], { quiet: true });
-  run('npx', ['wrangler', 'dev', '--port', String(PORT), '--persist-to', state, '--env-file', 'tests/test.env'], { quiet: true });
+  run('npx', ['wrangler', 'dev', '--port', String(PORT), '--persist-to', state, '--env-file', 'tests/test.env', '--local-upstream', `localhost:${PORT}`], { quiet: true });
   for (let i = 0; i < 60; i++) { try { if ((await fetch(U)).ok) break; } catch {} await sleep(1000); }
 
   const b = await chromium.launch();

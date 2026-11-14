@@ -3,6 +3,13 @@ name = "gastos-casa"
 main = "src/worker.js"
 compatibility_date = "2025-09-01"
 
+# Dominio propio de la app. La dirección *.workers.dev redirige aquí, así solo hay
+# una URI de redirección en Google y una cookie de sesión.
+routes = [{ pattern = "casitafeliz.diemo.dev", custom_domain = true }]
+
+[vars]
+CANONICAL_HOST = "casitafeliz.diemo.dev"
+
 # Los archivos de la app (public/) se incluyen dentro del Worker: ver src/static.js.
 [build]
 command = "node scripts/embed-static.mjs"

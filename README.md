@@ -50,7 +50,7 @@ Necesitas una cuenta de Cloudflare (el plan gratuito sirve), una cuenta de Googl
 2. *APIs y servicios → Pantalla de consentimiento de OAuth*: tipo **Externo**, pon el nombre de la app y tu email. En *Usuarios de prueba* añade los emails de la familia (o publica la app).
 3. *APIs y servicios → Credenciales → Crear credenciales → ID de cliente de OAuth* → **Aplicación web**.
 4. En **URI de redirección autorizados** añade:
-   - `https://gastos-casa.<tu-subdominio>.workers.dev/auth/callback` (o tu dominio)
+   - `https://casitafeliz.diemo.dev/auth/callback` (el dominio de la app; la dirección *.workers.dev redirige a él)
    - `http://localhost:8787/auth/callback` (para desarrollo)
 5. Guarda el **ID de cliente** y el **secreto de cliente**.
 
@@ -63,7 +63,7 @@ npx wrangler login                  # inicia sesión en Cloudflare
 npm run db:migrate                  # crea las tablas y las categorías por defecto
 npm run secrets                     # pide GOOGLE_CLIENT_ID, GOOGLE_CLIENT_SECRET y ALLOWED_EMAILS
 #   ALLOWED_EMAILS = emails separados por comas, p. ej.: tu.email@gmail.com,pareja@gmail.com
-npm run deploy                      # publica → https://gastos-casa.<tu-subdominio>.workers.dev
+npm run deploy                      # publica → https://casitafeliz.diemo.dev
 ```
 
 Abre la URL en el móvil, pulsa **Entrar con Google** y usa «Añadir a pantalla de inicio». Después, en *Ajustes → Familia*, pon a cada miembro su email de Google.
