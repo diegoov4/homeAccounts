@@ -63,6 +63,13 @@ class Parsing(unittest.TestCase):
         self.assertEqual((rows[0]['tipo'], rows[0]['miembro'], rows[0]['incluir']), ('aportacion', 'diego', 'si'))
         self.assertEqual((rows[1]['tipo'], rows[1]['incluir']), ('retirada', 'no'))
 
+    def test_split_rule(self):
+        rows = b.prepare_rows([{'date': dt.date(2026, 11, 2), 'amount': -185.17, 'concept': 'ADEUDO RECIBO C.P. GENERAL FANJUL, 161'},
+                               {'date': dt.date(2026, 10, 1), 'amount': -154.0, 'concept': 'ADEUDO RECIBO C.P. GENERAL FANJUL, 161'}], 'comun', '', [], [], 'sabadell')
+        b.apply_family_rules(rows, [{'match': 'general fanjul', 'tipo': 'gasto', 'categoria': 'comunidad', 'base': 154.0, 'resto_categoria': 'agua', 'resto_nota': 'Agua'}])
+        self.assertEqual([(r['categoria'], r['importe']) for r in rows], [('comunidad', '154.00'), ('comunidad', '154.00'), ('agua', '31.17')])
+        self.assertEqual(rows[2]['id'], rows[0]['id'] + 'agua')
+
     def test_cross_file_duplicates(self):
         rows = b.prepare_rows([{'date': dt.date(2026, 10, 2), 'amount': 1200, 'concept': 'TRANSFERENCIA DE MAMA'}],
                               'comun', '', [], [{'id': 'mama', 'name': 'Mamá'}])

@@ -224,13 +224,15 @@ def stable_id(account, member, m, n, source=''):
 def load_family_rules(target):
     """Reglas propias de la familia (nombres, nóminas, planes de ahorro…), guardadas en D1 y no en el repositorio.
     Formato: [{"match": "texto", "tipo": "aportacion|retirada|gasto|ingreso|ignorar", "miembro": "id",
-               "categoria": "id", "nota": "...", "devuelto": "si", "revisar": true}]"""
+               "categoria": "id", "nota": "...", "devuelto": "si", "revisar": true,
+               "base": 154.00, "resto_categoria": "agua", "resto_nota": "..."}]   ← divide recibos en parte fija + resto"""
     rows = d1_query("SELECT value FROM settings WHERE key = 'import_rules'", target)
     return json.loads(rows[0]['value']) if rows else []
 
 
 def apply_family_rules(rows, rules):
-    for r in rows:
+    extras = []
+    for r in list(rows):
         c = norm(r['concepto_banco'])
         rule = next((x for x in rules if norm(x['match']) in c), None)
         if not rule:
@@ -246,6 +248,14 @@ def apply_family_rules(rows, rules):
             r['nota'] = rule['nota']
         if rule.get('revisar'):
             r.update(incluir='no', aviso=f"revisar: {rule.get('nota') or rule['match']}")
+        # recibo con una parte fija y otra variable (p. ej. comunidad + agua): se divide en dos gastos
+        base = rule.get('base')
+        if base and float(r['importe']) > float(base) + 0.5:
+            extra = dict(r, importe=f"{float(r['importe']) - float(base):.2f}", categoria=rule.get('resto_categoria', 'otros'),
+                         nota=rule.get('resto_nota', r['nota']), id=r['id'] + 'agua' if rule.get('resto_categoria') == 'agua' else r['id'] + 'x')
+            r['importe'] = f"{float(base):.2f}"
+            extras.append(extra)
+    rows.extend(extras)
 
 
 def prepare_rows(movs, account, member, common_hints, members, source=''):
