@@ -60,9 +60,6 @@ Necesitas una cuenta de Cloudflare (el plan gratuito sirve), una cuenta de Googl
 npm install
 npx wrangler login                  # inicia sesión en Cloudflare
 
-npm run db:create                   # crea la base de datos D1 "gastos-casa"
-#   → copia el database_id que aparece y pégalo en wrangler.toml
-
 npm run db:migrate                  # crea las tablas y las categorías por defecto
 npm run secrets                     # pide GOOGLE_CLIENT_ID, GOOGLE_CLIENT_SECRET y ALLOWED_EMAILS
 #   ALLOWED_EMAILS = emails separados por comas, p. ej.: tu.email@gmail.com,pareja@gmail.com
@@ -78,6 +75,16 @@ cp .dev.vars.example .dev.vars      # rellena las credenciales de Google y ALLOW
 npm run db:migrate:local            # base de datos D1 local
 npm run dev                         # http://localhost:8787
 ```
+
+## Pruebas automáticas
+
+```bash
+npm test             # pruebas de extremo a extremo: Worker local + D1 vacía + Google simulado + navegador
+npm run test:smoke   # pruebas rápidas contra la app publicada
+npm run release      # pruebas → migraciones en D1 → despliegue → pruebas de la app publicada
+```
+
+`npm test` necesita Playwright con Chromium (`npm i -D playwright && npx playwright install chromium`). Comprueba el inicio de sesión (cuentas autorizadas y no autorizadas, `state`/`nonce` manipulados), gastos e ingresos, la cuenta común y las devoluciones, el acceso de los miembros, la protección CSRF, las cabeceras de seguridad y que el diseño no se desborde en el móvil.
 
 ## API
 
@@ -100,8 +107,11 @@ Rutas de sesión: `GET /auth/login`, `GET /auth/callback`, `POST /auth/logout`.
 
 ```
 public/               App web (HTML, CSS, JS, iconos, PWA)
-src/worker.js         Worker de Cloudflare: API + archivos estáticos
+src/worker.js         Worker de Cloudflare: API
 src/auth.js           Inicio de sesión con Google y sesiones
+src/static.js         Sirve los archivos de public/ (se incluyen dentro del Worker)
+scripts/              embed-static.mjs: empaqueta public/ antes de cada deploy/dev
+tests/                Pruebas automáticas (e2e y smoke)
 migrations/           Esquema y datos iniciales de D1
 wrangler.toml         Configuración de Cloudflare
 ```

@@ -8,7 +8,10 @@
     "db:create": "wrangler d1 create gastos-casa",
     "db:migrate:local": "wrangler d1 migrations apply gastos-casa --local",
     "db:migrate": "wrangler d1 migrations apply gastos-casa --remote",
-    "secrets": "wrangler secret put GOOGLE_CLIENT_ID && wrangler secret put GOOGLE_CLIENT_SECRET && wrangler secret put ALLOWED_EMAILS"
+    "secrets": "wrangler secret put GOOGLE_CLIENT_ID && wrangler secret put GOOGLE_CLIENT_SECRET && wrangler secret put ALLOWED_EMAILS",
+    "test": "node tests/e2e.mjs",
+    "test:smoke": "node tests/smoke.mjs",
+    "release": "npm test && wrangler d1 migrations apply gastos-casa --remote && wrangler deploy && npm run test:smoke"
   },
   "repository": {
     "type": "git",

@@ -6,6 +6,7 @@
  */
 
 import { getSession, handleAuth, inAllowList } from './auth.js';
+import { serveStatic } from './static.js';
 
 const json = (body, status = 200) =>
   new Response(JSON.stringify(body), {
@@ -269,6 +270,6 @@ export default {
         return new Response(String(err && err.message || 'Error'), { status: 500, headers: { 'content-type': 'text/plain; charset=utf-8' } });
       }
     }
-    return env.ASSETS.fetch(request);
+    return serveStatic(request, url);
   },
 };
