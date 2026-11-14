@@ -27,7 +27,7 @@
   const MONTHS_SHORT = ['ene', 'feb', 'mar', 'abr', 'may', 'jun', 'jul', 'ago', 'sep', 'oct', 'nov', 'dic'];
 
   const DEFAULT_CATEGORIES = [
-    ['hipoteca', 'Casa / Hipoteca', '🏠', '#64748b', 'Hogar'], ['luz', 'Luz', '💡', '#eab308', 'Hogar'],
+    ['hipoteca', 'Casa / Hipoteca', '🏠', '#64748b', 'Hogar'], ['comunidad', 'Comunidad de vecinos', '🏢', '#475569', 'Hogar'], ['luz', 'Luz', '💡', '#eab308', 'Hogar'],
     ['agua', 'Agua', '💧', '#0ea5e9', 'Hogar'], ['gas', 'Gas / Calefacción', '🔥', '#f97316', 'Hogar'],
     ['internet', 'Internet y móvil', '📶', '#8b5cf6', 'Hogar'], ['seguros', 'Seguros', '🛡️', '#0f766e', 'Hogar'],
     ['hogar', 'Hogar y bazar', '🛋️', '#b45309', 'Hogar'],

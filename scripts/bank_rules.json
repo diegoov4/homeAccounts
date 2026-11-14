@@ -2,17 +2,23 @@
   "_ayuda": "Reglas para clasificar movimientos del banco. Se busca cada palabra (sin mayúsculas ni tildes) dentro del concepto; gana la primera regla que coincida. 'category' es el id de la categoría en la app.",
   "categories": [
     {
+      "category": "comunidad",
+      "match": [
+        "c.p. ",
+        "comunidad de propietarios",
+        "comunidad prop",
+        "general fanjul"
+      ]
+    },
+    {
       "category": "hipoteca",
       "match": [
         "hipoteca",
         "prestamo hipotecario",
         "cuota prestamo",
         "alquiler",
-        "comunidad de propietarios",
-        "comunidad prop",
         "ibi ",
         "impuesto bienes inmuebles",
-        "c.p. ",
         "prestamos adeudo cuota",
         "climatizacion",
         "impuestos ayuntamiento",
