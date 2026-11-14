@@ -589,7 +589,9 @@
       const months = ui.mode === 'month' ? 1 : partialYear ? now.getMonth() : 12;
       const upTo = partialYear ? periodKey('month', now.getFullYear(), now.getMonth()) : null;
       const incs = inPeriod(data.incomes, periodKey()).filter((i) => !upTo || i.date < upTo);
-      const rows = s.members.map((x) => ({ m: x.m, contrib: netSum(incs.filter((i) => i.memberId === x.m.id)), inc: x.m.income * months }));
+      // lo que paga cada uno de su bolsillo para la casa (sin devolver) también es aportación suya
+      const exps = inPeriod(data.expenses, periodKey()).filter((e) => (!upTo || e.date < upTo) && e.paidBy && !e.reimbursed);
+      const rows = s.members.map((x) => ({ m: x.m, contrib: round2(netSum(incs.filter((i) => i.memberId === x.m.id)) + sum(exps.filter((e) => e.paidBy === x.m.id))), inc: x.m.income * months }));
       const totInc = rows.reduce((a, r) => a + r.inc, 0);
       const totContrib = rows.reduce((a, r) => a + r.contrib, 0);
       const p = totInc ? totContrib / totInc : 0;
@@ -599,7 +601,7 @@
       fairCard = `
       <section class="card">
         <h2>⚖️ ¿Aportáis el mismo %? <span class="muted">${esc(periodLabel())}</span></h2>
-        <p class="muted" style="margin:-4px 0 12px">Lo que pone cada uno en la cuenta común (neto) respecto a sus ingresos${partialYear ? ` de enero a ${MONTHS[now.getMonth() - 1]}` : months > 1 ? ` de ${months} meses` : ''}. Entre los dos aportáis el <b>${Math.round(p * 100)} %</b>.</p>
+        <p class="muted" style="margin:-4px 0 12px">Lo que pone cada uno (en la cuenta común, neto, más lo que paga de su bolsillo para la casa) respecto a sus ingresos${partialYear ? ` de enero a ${MONTHS[now.getMonth() - 1]}` : months > 1 ? ` de ${months} meses` : ''}. Entre los dos aportáis el <b>${Math.round(p * 100)} %</b>.</p>
         <div class="rows">${rows.map((r) => `
           <div class="row static">
             <span class="avatar">${esc(r.m.name.slice(0, 1).toUpperCase())}</span>
