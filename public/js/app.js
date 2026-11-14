@@ -30,6 +30,7 @@
     ['hipoteca', 'Casa / Hipoteca', '🏠', '#64748b', 'Hogar'], ['luz', 'Luz', '💡', '#eab308', 'Hogar'],
     ['agua', 'Agua', '💧', '#0ea5e9', 'Hogar'], ['gas', 'Gas / Calefacción', '🔥', '#f97316', 'Hogar'],
     ['internet', 'Internet y móvil', '📶', '#8b5cf6', 'Hogar'], ['seguros', 'Seguros', '🛡️', '#0f766e', 'Hogar'],
+    ['hogar', 'Hogar y bazar', '🛋️', '#b45309', 'Hogar'],
     ['super', 'Supermercado', '🛒', '#16a34a', 'Alimentación'], ['cenas', 'Cenas fuera', '🍽️', '#e11d48', 'Alimentación'],
     ['colegio', 'Colegio', '🎒', '#2563eb', 'Niños'], ['ninos', 'Gastos niños', '🧸', '#f59e0b', 'Niños'],
     ['extraescolares', 'Extraescolares', '⚽', '#65a30d', 'Niños'], ['transporte', 'Coche y transporte', '🚗', '#14b8a6', 'Transporte'],

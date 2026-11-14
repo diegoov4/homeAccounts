@@ -112,6 +112,22 @@
       ]
     },
     {
+      "category": "hogar",
+      "match": [
+        "action",
+        "6221 alcorcon",
+        "pepco",
+        "ikea",
+        "bazar",
+        "tejidos",
+        "textiles",
+        "leroy merlin",
+        "bricomart",
+        "bricodepot",
+        "zhou hong"
+      ]
+    },
+    {
       "category": "super",
       "match": [
         "mercadona",
