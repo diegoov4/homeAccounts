@@ -15,3 +15,8 @@ binding = "DB"
 database_name = "gastos-casa"
 database_id = "00000000-0000-0000-0000-000000000000"
 migrations_dir = "migrations"
+
+# Secretos necesarios (no se guardan en el repositorio):
+#   GOOGLE_CLIENT_ID, GOOGLE_CLIENT_SECRET  → credenciales OAuth de Google
+#   ALLOWED_EMAILS                          → emails autorizados, separados por comas
+# Configúralos con:  npm run secrets

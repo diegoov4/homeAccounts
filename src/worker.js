@@ -1,9 +1,11 @@
 /* API de Gastos de Casa sobre Cloudflare Workers + D1.
  *
- * Todas las rutas /api/* requieren la cabecera `X-Family-Key` con la clave
- * familiar (secreto FAMILY_KEY). El resto de rutas sirve la app estática.
+ * Las rutas /api/* requieren haber iniciado sesión con Google (ver src/auth.js).
+ * El resto de rutas sirve la app estática.
  * Los importes viajan y se guardan en céntimos (enteros).
  */
+
+import { getSession, handleAuth, inAllowList } from './auth.js';
 
 const json = (body, status = 200) =>
   new Response(JSON.stringify(body), {
@@ -71,10 +73,14 @@ function vCategory(b, id) {
     sort: vInt(b.sort),
   };
 }
+const EMAIL_RE = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
 function vMember(b, id) {
+  const email = vText(b.email, 120, 'email').toLowerCase();
+  if (email && !EMAIL_RE.test(email)) bad('email no válido');
   return {
     id: vId(id ?? b.id),
     name: vText(b.name, 30, 'nombre', { required: true }),
+    email,
     monthly_contribution: vCents(b.monthly_contribution ?? 0, 'aportación', { allowZero: true }),
     sort: vInt(b.sort),
   };
@@ -91,15 +97,15 @@ const UPSERT = {
   categories: `INSERT INTO categories (id, name, icon, color, grp, budget, sort)
                VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7)
                ON CONFLICT(id) DO UPDATE SET name=?2, icon=?3, color=?4, grp=?5, budget=?6, sort=?7`,
-  members: `INSERT INTO members (id, name, monthly_contribution, sort)
-            VALUES (?1, ?2, ?3, ?4)
-            ON CONFLICT(id) DO UPDATE SET name=?2, monthly_contribution=?3, sort=?4`,
+  members: `INSERT INTO members (id, name, monthly_contribution, sort, email)
+            VALUES (?1, ?2, ?3, ?4, ?5)
+            ON CONFLICT(id) DO UPDATE SET name=?2, monthly_contribution=?3, sort=?4, email=?5`,
 };
 const COLS = {
   expenses: ['id', 'amount', 'category_id', 'date', 'note', 'paid_by', 'reimbursed', 'created_at'],
   incomes: ['id', 'amount', 'member_id', 'date', 'note', 'created_at'],
   categories: ['id', 'name', 'icon', 'color', 'grp', 'budget', 'sort'],
-  members: ['id', 'name', 'monthly_contribution', 'sort'],
+  members: ['id', 'name', 'monthly_contribution', 'sort', 'email'],
 };
 const VALIDATE = { expenses: vExpense, incomes: vIncome, categories: vCategory, members: vMember };
 const bindRow = (db, table, row) => db.prepare(UPSERT[table]).bind(...COLS[table].map((c) => row[c]));
@@ -139,17 +145,6 @@ function writeSettingsStmts(db, b) {
   return stmts;
 }
 
-// ---------------------------------------------------------------- autenticación
-async function sha256(s) {
-  return crypto.subtle.digest('SHA-256', new TextEncoder().encode(s));
-}
-async function authorized(request, env) {
-  if (!env.FAMILY_KEY) throw new HttpError(500, 'Falta configurar el secreto FAMILY_KEY en el Worker');
-  const given = request.headers.get('x-family-key') || '';
-  const [a, b] = await Promise.all([sha256(given), sha256(env.FAMILY_KEY)]);
-  return crypto.subtle.timingSafeEqual(a, b);
-}
-
 // ---------------------------------------------------------------- rutas
 async function readBody(request) {
   const len = Number(request.headers.get('content-length') || 0);
@@ -158,14 +153,19 @@ async function readBody(request) {
 }
 
 async function handleApi(request, env, url) {
-  if (!(await authorized(request, env))) return json({ error: 'Clave familiar incorrecta' }, 401);
-  const db = env.DB;
+  const user = await getSession(request, env);
+  if (!user) return json({ error: 'Inicia sesión con Google' }, 401);
   const method = request.method;
+  // Protección CSRF adicional a SameSite: las escrituras deben venir de la propia app.
+  const origin = request.headers.get('origin');
+  if (method !== 'GET' && origin && origin !== url.origin) return json({ error: 'Origen no permitido' }, 403);
+  const db = env.DB;
   const parts = url.pathname.replace(/^\/api\/?/, '').split('/').filter(Boolean);
   const [resource, id] = parts;
 
   // GET /api/data — todo el estado de la familia
-  if (resource === 'data' && method === 'GET') return json(await readAll(db));
+  if (resource === 'data' && method === 'GET') return json({ ...(await readAll(db)), me: user });
+  if (resource === 'me' && method === 'GET') return json(user);
 
   // PUT /api/settings
   if (resource === 'settings' && method === 'PUT') {
@@ -189,6 +189,9 @@ async function handleApi(request, env, url) {
     if (!b.categories.length) bad('Debe haber al menos una categoría');
     const rows = {};
     for (const t of ['members', 'categories', 'expenses', 'incomes']) rows[t] = b[t].map((r) => VALIDATE[t](r));
+    if (!inAllowList(env, user.email) && !rows.members.some((m) => m.email === user.email)) {
+      bad('Te quedarías sin acceso: los datos importados no tienen ningún miembro con tu email');
+    }
     const stmts = [
       db.prepare('DELETE FROM expenses'),
       db.prepare('DELETE FROM incomes'),
@@ -201,14 +204,21 @@ async function handleApi(request, env, url) {
       ...writeSettingsStmts(db, b.settings || {}),
     ];
     await db.batch(stmts); // atómico: o se aplica todo o nada
-    return json(await readAll(db));
+    return json({ ...(await readAll(db)), me: user });
   }
 
   // CRUD: /api/{expenses|incomes|categories|members}/:id
   if (VALIDATE[resource] && id) {
     vId(id);
+    // evita que alguien que entra gracias a su email de miembro se quede fuera
+    const guardOwnAccess = async (newEmail) => {
+      if (resource !== 'members' || inAllowList(env, user.email)) return;
+      const cur = await db.prepare('SELECT email FROM members WHERE id = ?1').bind(id).first();
+      if (cur && cur.email === user.email && newEmail !== user.email) bad('No puedes quitarte tu propio email: perderías el acceso');
+    };
     if (method === 'PUT') {
       const row = VALIDATE[resource](await readBody(request), id);
+      await guardOwnAccess(row.email);
       await bindRow(db, resource, row).run();
       return json(row);
     }
@@ -223,6 +233,7 @@ async function handleApi(request, env, url) {
         stmts.push(db.prepare('UPDATE expenses SET category_id = ?1 WHERE category_id = ?2').bind(moveTo, id));
       }
       if (resource === 'members') {
+        await guardOwnAccess(null);
         const used = await db.prepare('SELECT (SELECT COUNT(*) FROM expenses WHERE paid_by = ?1) + (SELECT COUNT(*) FROM incomes WHERE member_id = ?1) AS n').bind(id).first();
         if (used.n > 0) throw new HttpError(409, 'Este miembro tiene movimientos y no se puede borrar');
       }
@@ -244,9 +255,18 @@ export default {
       } catch (err) {
         if (err instanceof HttpError) return json({ error: err.message }, err.status);
         const msg = String(err && err.message || err);
+        if (/UNIQUE constraint failed: members/i.test(msg) || /idx_members_email/i.test(msg)) return json({ error: 'Ese email ya está asignado a otro miembro' }, 409);
         if (/FOREIGN KEY/i.test(msg)) return json({ error: 'Referencia no válida (categoría o miembro inexistente)' }, 409);
         console.error(err);
         return json({ error: 'Error interno' }, 500);
+      }
+    }
+    if (url.pathname.startsWith('/auth/')) {
+      try {
+        return await handleAuth(request, env, url);
+      } catch (err) {
+        console.error(err);
+        return new Response(String(err && err.message || 'Error'), { status: 500, headers: { 'content-type': 'text/plain; charset=utf-8' } });
       }
     }
     return env.ASSETS.fetch(request);

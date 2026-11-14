@@ -44,18 +44,19 @@
   const INCOME_COLOR = '#16a34a';
 
   // ---------------------------------------------------------------- modelo (euros en el cliente, céntimos en la API)
-  const emptyData = () => ({ settings: { currency: 'EUR', initialBalance: 0 }, members: [], categories: DEFAULT_CATEGORIES.map((c) => ({ ...c })), expenses: [], incomes: [] });
+  const emptyData = () => ({ me: null, settings: { currency: 'EUR', initialBalance: 0 }, members: [], categories: DEFAULT_CATEGORIES.map((c) => ({ ...c })), expenses: [], incomes: [] });
 
   function fromApi(d) {
     return {
+      me: d.me || null,
       settings: { currency: d.settings?.currency || 'EUR', initialBalance: (d.settings?.initial_balance || 0) / 100 },
-      members: (d.members || []).map((m) => ({ id: m.id, name: m.name, monthly: m.monthly_contribution / 100, sort: m.sort })),
+      members: (d.members || []).map((m) => ({ id: m.id, name: m.name, email: m.email || '', monthly: m.monthly_contribution / 100, sort: m.sort })),
       categories: (d.categories || []).map((c) => ({ id: c.id, name: c.name, icon: c.icon, color: c.color, group: c.grp, budget: c.budget / 100, sort: c.sort })),
       expenses: (d.expenses || []).map((e) => ({ id: e.id, amount: e.amount / 100, categoryId: e.category_id, date: e.date, note: e.note, paidBy: e.paid_by || '', reimbursed: Boolean(e.reimbursed), createdAt: e.created_at })),
       incomes: (d.incomes || []).map((i) => ({ id: i.id, amount: i.amount / 100, memberId: i.member_id || '', date: i.date, note: i.note, createdAt: i.created_at })),
     };
   }
-  const apiMember = (m) => ({ id: m.id, name: m.name, monthly_contribution: toCents(m.monthly || 0), sort: m.sort || 0 });
+  const apiMember = (m) => ({ id: m.id, name: m.name, email: m.email || '', monthly_contribution: toCents(m.monthly || 0), sort: m.sort || 0 });
   const apiCategory = (c) => ({ id: c.id, name: c.name, icon: c.icon, color: c.color, grp: c.group, budget: toCents(c.budget || 0), sort: c.sort || 0 });
   const apiExpense = (e) => ({ id: e.id, amount: toCents(e.amount), category_id: e.categoryId, date: e.date, note: e.note, paid_by: e.paidBy || null, reimbursed: e.reimbursed ? 1 : 0, created_at: e.createdAt });
   const apiIncome = (i) => ({ id: i.id, amount: toCents(i.amount), member_id: i.memberId || null, date: i.date, note: i.note, created_at: i.createdAt });
@@ -84,7 +85,10 @@
   const cache = () => lsSet(LS + ':cache', JSON.stringify(data));
 
   // ---------------------------------------------------------------- API
-  let familyKey = lsGet(LS + ':key') || '';
+  // signedIn: este dispositivo tenía sesión (para mostrar la caché mientras se comprueba).
+  let signedIn = lsGet(LS + ':signedIn') === '1';
+  let checking = true;
+  let loginMessage = '';
 
   class AuthError extends Error {}
   async function api(method, path, body) {
@@ -92,7 +96,8 @@
     try {
       res = await fetch('/api' + path, {
         method,
-        headers: { 'content-type': 'application/json', 'x-family-key': familyKey },
+        headers: { 'content-type': 'application/json' },
+        credentials: 'same-origin',
         body: body === undefined ? undefined : JSON.stringify(body),
       });
     } catch (_) { throw new Error('Sin conexión con el servidor'); }
@@ -111,7 +116,7 @@
       return true;
     } catch (err) {
       data = JSON.parse(backup); cache(); render();
-      if (err instanceof AuthError) logout(err.message);
+      if (err instanceof AuthError) signedOut('Tu sesión ha caducado. Vuelve a entrar.');
       else toast('⚠️ No se ha guardado: ' + err.message);
       return false;
     }
@@ -120,10 +125,14 @@
   async function refresh({ quiet = false } = {}) {
     try {
       data = fromApi(await api('GET', '/data'));
+      checking = false;
+      if (!signedIn) { signedIn = true; lsSet(LS + ':signedIn', '1'); }
       cache(); render();
       offerLegacyImport();
     } catch (err) {
-      if (err instanceof AuthError) return logout(err.message);
+      checking = false;
+      if (err instanceof AuthError) return signedOut(signedIn ? 'Tu sesión ha caducado. Vuelve a entrar.' : loginMessage);
+      if (!signedIn) return renderLogin(err.message);
       if (!quiet) toast('📴 ' + err.message + '. Mostrando los últimos datos guardados.');
     }
   }
@@ -134,15 +143,20 @@
       cache(); toast(okMsg); goto('resumen');
       return true;
     } catch (err) {
-      if (err instanceof AuthError) logout(err.message); else toast('⚠️ ' + err.message);
+      if (err instanceof AuthError) signedOut('Tu sesión ha caducado. Vuelve a entrar.'); else toast('⚠️ ' + err.message);
       return false;
     }
   }
 
-  function logout(msg) {
-    familyKey = ''; lsDel(LS + ':key'); lsDel(LS + ':cache'); data = emptyData();
+  // Borra los datos locales y muestra la pantalla de inicio de sesión.
+  function signedOut(msg = '') {
+    signedIn = false; lsDel(LS + ':signedIn'); lsDel(LS + ':cache'); data = emptyData();
     closeSheet();
     renderLogin(msg);
+  }
+  async function logout() {
+    try { await fetch('/auth/logout', { method: 'POST', credentials: 'same-origin' }); } catch (_) {}
+    signedOut('Has cerrado la sesión.');
   }
 
   function offerLegacyImport() {
@@ -165,6 +179,7 @@
   const catById = (id) => data.categories.find((c) => c.id === id) || { id, name: 'Sin categoría', icon: '❔', color: '#78716c', group: 'Otros', budget: 0 };
   const memberById = (id) => data.members.find((m) => m.id === id);
   const memberName = (id) => (memberById(id) || { name: '¿?' }).name;
+  const isMe = (m) => Boolean(m && m.email && data.me && m.email === String(data.me.email).toLowerCase());
 
   function money(n, opts = {}) {
     const cur = data.settings.currency;
@@ -245,7 +260,7 @@
   const main = $('#main');
 
   function render() {
-    if (!familyKey) return renderLogin();
+    if (!signedIn) return renderLogin(checking ? null : loginMessage);
     document.body.classList.remove('locked');
     $('#view-title').textContent = TITLES[ui.view];
     const tab = ui.view === 'categorias' ? 'ajustes' : ui.view;
@@ -286,35 +301,22 @@
   }
 
   // ---------- Login
+  const GOOGLE_G = '<svg viewBox="0 0 48 48" width="20" height="20" aria-hidden="true"><path fill="#FFC107" d="M43.6 20.5H42V20H24v8h11.3C33.7 32.7 29.2 36 24 36c-6.6 0-12-5.4-12-12s5.4-12 12-12c3.1 0 5.8 1.2 7.9 3.1l5.7-5.7C34 6.1 29.3 4 24 4 12.9 4 4 12.9 4 24s8.9 20 20 20 20-8.9 20-20c0-1.3-.1-2.4-.4-3.5z"/><path fill="#FF3D00" d="M6.3 14.7l6.6 4.8C14.7 15.1 19 12 24 12c3.1 0 5.8 1.2 7.9 3.1l5.7-5.7C34 6.1 29.3 4 24 4 16.3 4 9.7 8.3 6.3 14.7z"/><path fill="#4CAF50" d="M24 44c5.2 0 9.9-2 13.4-5.2l-6.2-5.2C29.2 35.1 26.7 36 24 36c-5.2 0-9.6-3.3-11.3-7.9l-6.5 5C9.5 39.6 16.2 44 24 44z"/><path fill="#1976D2" d="M43.6 20.5H42V20H24v8h11.3c-.8 2.2-2.2 4.2-4.1 5.6l6.2 5.2C37 39.2 44 34 44 24c0-1.3-.1-2.4-.4-3.5z"/></svg>';
+
+  // msg === null → todavía comprobando la sesión
   function renderLogin(msg = '') {
     document.body.classList.add('locked');
     $('#view-title').textContent = 'Bienvenidos';
-    main.innerHTML = `
-      <div class="card empty">
-        <div class="big">🔐</div>
-        <h3>Clave de la familia</h3>
-        <p>Escribe la clave que configurasteis al instalar la app. Solo hay que hacerlo una vez en cada dispositivo.</p>
-        <form id="login-form" class="inline-form" style="max-width:360px;margin:0 auto">
-          <input class="input" type="password" name="key" placeholder="Clave" autocomplete="current-password" required>
-          <button class="btn primary" type="submit">Entrar</button>
-        </form>
-        ${msg ? `<p class="over-txt" style="margin-top:12px">${esc(msg)}</p>` : ''}
+    main.innerHTML = msg === null ? `
+      <div class="card empty"><div class="big">🏡</div><p>Cargando…</p></div>` : `
+      <div class="card empty login">
+        <div class="big">🏡</div>
+        <h3>Gastos de Casa</h3>
+        <p>Entra con tu cuenta de Google para ver y apuntar los gastos de la familia.</p>
+        <a class="btn google" href="/auth/login">${GOOGLE_G} Entrar con Google</a>
+        ${msg ? `<p class="login-msg">${esc(msg)}</p>` : ''}
+        <p class="faint" style="font-size:12px;margin:16px 0 0">Solo pueden entrar las cuentas autorizadas de la familia.</p>
       </div>`;
-    const form = $('#login-form');
-    setTimeout(() => form.key.focus(), 50);
-    form.addEventListener('submit', async (ev) => {
-      ev.preventDefault();
-      familyKey = form.key.value.trim();
-      if (!familyKey) return;
-      try {
-        data = fromApi(await api('GET', '/data'));
-        lsSet(LS + ':key', familyKey); cache();
-        render(); offerLegacyImport();
-      } catch (err) {
-        familyKey = '';
-        renderLogin(err instanceof AuthError ? 'Clave incorrecta. Inténtalo de nuevo.' : err.message);
-      }
-    });
   }
 
   // ---------- Resumen
@@ -771,12 +773,12 @@
     main.innerHTML = `
       <section class="card">
         <h2>👨‍👩‍👧‍👦 Familia y aportaciones</h2>
-        <p class="muted" style="margin-top:-6px">Quién aporta a la cuenta común y cuánto al mes. Así podréis apuntar quién paga algo por su cuenta y saber si lo que ponéis es suficiente.</p>
+        <p class="muted" style="margin-top:-6px">Quién aporta a la cuenta común y cuánto al mes. Si le pones su email de Google, esa persona podrá entrar en la app.</p>
         <div class="rows">
           ${data.members.map((m) => `
             <button class="row" data-member="${esc(m.id)}">
               <span class="avatar">${esc(m.name.slice(0, 1).toUpperCase())}</span>
-              <span class="row-main"><span class="row-top"><span class="row-title">${esc(m.name)}</span><span class="amount">${m.monthly ? money(m.monthly, { noCents: true }) + '/mes' : '<span class="faint">sin aportación fija</span>'}</span></span></span>
+              <span class="row-main"><span class="row-top"><span class="row-title">${esc(m.name)}${isMe(m) ? ' <span class="tag me-tag">Tú</span>' : ''}</span><span class="amount">${m.monthly ? money(m.monthly, { noCents: true }) + '/mes' : '<span class="faint">sin aportación fija</span>'}</span></span><span class="row-sub">${m.email ? '🔑 ' + esc(m.email) : 'Sin acceso a la app'}</span></span>
             </button>`).join('') || '<p class="faint">Aún no hay miembros.</p>'}
         </div>
         <button class="btn block" data-act="new-member" style="margin-top:8px">➕ Añadir miembro</button>
@@ -829,7 +831,10 @@
 
       <section class="card">
         <div class="setting">
-          <div><div class="s-title">Cerrar sesión</div><div class="s-sub">Olvida la clave en este dispositivo</div></div>
+          <div class="me">
+            ${data.me && data.me.picture ? `<img src="${esc(data.me.picture)}" alt="" referrerpolicy="no-referrer" width="38" height="38">` : `<span class="avatar">${esc(((data.me && (data.me.name || data.me.email)) || '?').slice(0, 1).toUpperCase())}</span>`}
+            <div><div class="s-title">${esc((data.me && data.me.name) || 'Sesión iniciada')}</div><div class="s-sub">${esc((data.me && data.me.email) || '')}</div></div>
+          </div>
           <button class="btn" data-act="logout">🚪 Salir</button>
         </div>
       </section>
@@ -982,7 +987,8 @@
 
   function openIncomeForm(inc = null, presetAmount = '') {
     const editing = Boolean(inc);
-    let memberId = inc ? inc.memberId : (data.members.length ? (lsGet(LS + ':lastIncomeMember') || data.members[0].id) : '');
+    const mine = data.members.find(isMe);
+    let memberId = inc ? inc.memberId : (data.members.length ? ((mine && mine.id) || lsGet(LS + ':lastIncomeMember') || data.members[0].id) : '');
     if (memberId && !memberById(memberId)) memberId = data.members[0] ? data.members[0].id : '';
     const fill = !inc && !presetAmount && memberId ? (memberById(memberId).monthly || '') : '';
 
@@ -1045,6 +1051,11 @@
       <form id="mem-form" autocomplete="off">
         <div class="field"><label for="m-name">Nombre</label><input class="input" id="m-name" maxlength="30" required value="${esc(member ? member.name : '')}" placeholder="Ej.: Mamá, Papá, Lucía…"></div>
         <div class="field">
+          <label for="m-email">Email de Google</label>
+          <input class="input" id="m-email" type="email" maxlength="120" autocomplete="off" placeholder="nombre@gmail.com (opcional)" value="${esc(member ? member.email || '' : '')}">
+          <p class="faint" style="font-size:13px;margin:6px 0 0">Con su email podrá entrar en la app con su cuenta de Google.</p>
+        </div>
+        <div class="field">
           <label for="m-monthly">Aportación fija mensual a la cuenta común</label>
           <input class="input" id="m-monthly" inputmode="decimal" placeholder="0,00 (opcional)" value="${member && member.monthly ? String(member.monthly).replace('.', ',') : ''}">
           <p class="faint" style="font-size:13px;margin:6px 0 0">Se usa para registrar las aportaciones del mes con un toque y para calcular si es suficiente.</p>
@@ -1071,7 +1082,11 @@
         const raw = $('#m-monthly', root).value.trim();
         const monthly = raw ? parseAmount(raw) : 0;
         if (Number.isNaN(monthly) || monthly < 0) return toast('Aportación no válida');
-        const item = { id: member ? member.id : uid(), name, monthly, sort: member ? member.sort : data.members.length };
+        const email = $('#m-email', root).value.trim().toLowerCase();
+        if (email && !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) return toast('Email no válido');
+        if (email && data.members.some((m) => m.email === email && m.id !== (member && member.id))) return toast('Ese email ya es de otro miembro');
+        if (member && isMe(member) && member.email && email !== member.email && !confirm('Vas a cambiar tu propio email. Si no estás en la lista de emails autorizados del servidor, perderás el acceso. ¿Continuar?')) return;
+        const item = { id: member ? member.id : uid(), name, email, monthly, sort: member ? member.sort : data.members.length };
         closeSheet();
         persist(() => { if (editing) Object.assign(member, item); else data.members.push(item); }, () => api('PUT', '/members/' + item.id, apiMember(item)))
           .then((ok) => ok && toast(editing ? 'Guardado' : `👤 ${name} añadido`));
@@ -1261,10 +1276,23 @@
     openExpenseForm(null, ui.view === 'movimientos' ? ui.filterCat : '');
   });
   // al volver a la app, traer los cambios del resto de la familia
-  document.addEventListener('visibilitychange', () => { if (!document.hidden && familyKey) refresh({ quiet: true }); });
+  document.addEventListener('visibilitychange', () => { if (!document.hidden && signedIn) refresh({ quiet: true }); });
+
+  // mensajes al volver del login de Google
+  const params = new URLSearchParams(location.search);
+  const LOGIN_ERRORS = {
+    not_allowed: `La cuenta ${params.get('email') || ''} no tiene acceso. Pide a alguien de la familia que te añada como miembro con este email.`,
+    cancelled: 'Has cancelado el inicio de sesión.',
+    state: 'La sesión de inicio ha caducado. Vuelve a intentarlo.',
+    failed: 'No se ha podido iniciar sesión con Google. Vuelve a intentarlo.',
+  };
+  if (params.get('login_error')) {
+    loginMessage = LOGIN_ERRORS[params.get('login_error')] || LOGIN_ERRORS.failed;
+    history.replaceState(null, '', location.pathname);
+  }
 
   render();
-  if (familyKey) refresh();
+  refresh();
 
   if ('serviceWorker' in navigator && location.protocol.startsWith('http')) {
     window.addEventListener('load', () => navigator.serviceWorker.register('sw.js').catch(() => {}));

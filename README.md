@@ -2,7 +2,7 @@
 
 Aplicación web para gestionar los gastos de la familia y la **cuenta común**: colegio, niños, supermercado, cenas fuera, luz, agua, gas, hipoteca, coche… cada categoría con su icono, su color y, si quieres, su presupuesto mensual. Calcula si lo que aportáis a la cuenta común es suficiente y lleva la cuenta de lo que alguien paga con su propio dinero.
 
-Funciona en **Cloudflare Workers** con la base de datos **Cloudflare D1**, así que todos los móviles de la familia ven los mismos datos.
+Funciona en **Cloudflare Workers** con la base de datos **Cloudflare D1**, así que todos los móviles de la familia ven los mismos datos. Se entra con **la cuenta de Google** de cada uno.
 
 ## Qué hace
 
@@ -31,9 +31,30 @@ Funciona en **Cloudflare Workers** con la base de datos **Cloudflare D1**, así 
 | Saldo de la cuenta común | Saldo inicial + todos los ingresos − gastos pagados desde la cuenta (incluidos los devueltos) |
 | Pendiente de devolver | Gastos pagados por alguien por su cuenta y no marcados como devueltos |
 
+## Inicio de sesión con Google
+
+- Botón **«Entrar con Google»**; la sesión dura 30 días en cada dispositivo.
+- Solo entran las cuentas autorizadas:
+  - las de la lista fija `ALLOWED_EMAILS` (secreto del Worker), y
+  - las de los **miembros** que tengan su email puesto en *Ajustes → Familia*. Así se invita a alguien sin tocar la configuración, y si se le quita el email pierde el acceso al momento.
+- Nadie puede quitarse a sí mismo el acceso por error (salvo que esté en `ALLOWED_EMAILS`).
+- Seguridad: flujo OAuth con PKCE, `state` y `nonce`; cookie de sesión `HttpOnly`, `Secure`, `SameSite=Lax`; en D1 solo se guarda el hash de la sesión; las escrituras desde otro origen se rechazan.
+
 ## Puesta en marcha (Cloudflare)
 
-Necesitas una cuenta de Cloudflare (el plan gratuito sirve) y Node.js 18 o superior.
+Necesitas una cuenta de Cloudflare (el plan gratuito sirve), una cuenta de Google y Node.js 18 o superior.
+
+### 1. Crea las credenciales de Google
+
+1. Entra en [Google Cloud Console](https://console.cloud.google.com/) y crea un proyecto (por ejemplo «Gastos de Casa»).
+2. *APIs y servicios → Pantalla de consentimiento de OAuth*: tipo **Externo**, pon el nombre de la app y tu email. En *Usuarios de prueba* añade los emails de la familia (o publica la app).
+3. *APIs y servicios → Credenciales → Crear credenciales → ID de cliente de OAuth* → **Aplicación web**.
+4. En **URI de redirección autorizados** añade:
+   - `https://gastos-casa.<tu-subdominio>.workers.dev/auth/callback` (o tu dominio)
+   - `http://localhost:8787/auth/callback` (para desarrollo)
+5. Guarda el **ID de cliente** y el **secreto de cliente**.
+
+### 2. Publica en Cloudflare
 
 ```bash
 npm install
@@ -43,29 +64,31 @@ npm run db:create                   # crea la base de datos D1 "gastos-casa"
 #   → copia el database_id que aparece y pégalo en wrangler.toml
 
 npm run db:migrate                  # crea las tablas y las categorías por defecto
-npm run secret                      # define la CLAVE FAMILIAR (FAMILY_KEY)
-npm run deploy                      # publica la app → https://gastos-casa.<tu-subdominio>.workers.dev
+npm run secrets                     # pide GOOGLE_CLIENT_ID, GOOGLE_CLIENT_SECRET y ALLOWED_EMAILS
+#   ALLOWED_EMAILS = emails separados por comas, p. ej.: tu.email@gmail.com,pareja@gmail.com
+npm run deploy                      # publica → https://gastos-casa.<tu-subdominio>.workers.dev
 ```
 
-Abre la URL en el móvil, escribe la clave familiar (solo la primera vez) y usa «Añadir a pantalla de inicio».
-
-> 🔐 La clave familiar protege la API. Usa una clave larga. Si quieres más seguridad (inicio de sesión con email), pon la app detrás de **Cloudflare Access**.
+Abre la URL en el móvil, pulsa **Entrar con Google** y usa «Añadir a pantalla de inicio». Después, en *Ajustes → Familia*, pon a cada miembro su email de Google.
 
 ### Desarrollo en local
 
 ```bash
-cp .dev.vars.example .dev.vars      # define FAMILY_KEY para local
+cp .dev.vars.example .dev.vars      # rellena las credenciales de Google y ALLOWED_EMAILS
 npm run db:migrate:local            # base de datos D1 local
 npm run dev                         # http://localhost:8787
 ```
 
 ## API
 
-Todas las rutas necesitan la cabecera `X-Family-Key`. Los importes van en **céntimos**.
+Todas las rutas `/api/*` necesitan sesión iniciada (cookie). Los importes van en **céntimos**.
+
+Rutas de sesión: `GET /auth/login`, `GET /auth/callback`, `POST /auth/logout`.
 
 | Método | Ruta | Descripción |
 |---|---|---|
-| GET | `/api/data` | Todos los datos (ajustes, miembros, categorías, gastos, ingresos) |
+| GET | `/api/data` | Todos los datos (ajustes, miembros, categorías, gastos, ingresos) y el usuario (`me`) |
+| GET | `/api/me` | Usuario con sesión iniciada |
 | PUT | `/api/expenses/:id` · `/api/incomes/:id` · `/api/categories/:id` · `/api/members/:id` | Crear o actualizar |
 | DELETE | `/api/expenses/:id` · `/api/incomes/:id` · `/api/members/:id` | Borrar (un miembro con movimientos no se puede borrar) |
 | DELETE | `/api/categories/:id?move_to=otros` | Borrar categoría moviendo sus gastos |
@@ -78,6 +101,7 @@ Todas las rutas necesitan la cabecera `X-Family-Key`. Los importes van en **cén
 ```
 public/               App web (HTML, CSS, JS, iconos, PWA)
 src/worker.js         Worker de Cloudflare: API + archivos estáticos
+src/auth.js           Inicio de sesión con Google y sesiones
 migrations/           Esquema y datos iniciales de D1
 wrangler.toml         Configuración de Cloudflare
 ```

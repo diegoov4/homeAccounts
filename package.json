@@ -8,7 +8,7 @@
     "db:create": "wrangler d1 create gastos-casa",
     "db:migrate:local": "wrangler d1 migrations apply gastos-casa --local",
     "db:migrate": "wrangler d1 migrations apply gastos-casa --remote",
-    "secret": "wrangler secret put FAMILY_KEY"
+    "secrets": "wrangler secret put GOOGLE_CLIENT_ID && wrangler secret put GOOGLE_CLIENT_SECRET && wrangler secret put ALLOWED_EMAILS"
   },
   "repository": {
     "type": "git",

@@ -1,2 +1,6 @@
 # Copia este archivo como .dev.vars para desarrollo local.
-FAMILY_KEY=cambia-esta-clave
+# Credenciales OAuth de Google (Google Cloud Console → APIs y servicios → Credenciales).
+GOOGLE_CLIENT_ID=xxxxxxxx.apps.googleusercontent.com
+GOOGLE_CLIENT_SECRET=xxxxxxxx
+# Emails que pueden entrar (separados por comas). Los miembros con email también pueden entrar.
+ALLOWED_EMAILS=tu.email@gmail.com,pareja@gmail.com
