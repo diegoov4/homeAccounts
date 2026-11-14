@@ -781,8 +781,10 @@
     let exps = inPeriod(data.expenses, key);
     let incs = inPeriod(data.incomes, key);
     const usedCats = new Set(exps.map((e) => e.categoryId));
-    if (ui.filterType === 'income') exps = [];
+    if (ui.filterType === 'income' || ui.filterType === 'withdrawal') exps = [];
     if (ui.filterType === 'expense' || ui.filterType === 'personal' || ui.filterCat) incs = [];
+    if (ui.filterType === 'income') incs = incs.filter((i) => !isWithdrawal(i));
+    if (ui.filterType === 'withdrawal') incs = incs.filter(isWithdrawal);
     if (ui.filterType === 'personal') exps = exps.filter((e) => e.paidBy);
     if (ui.filterCat) exps = exps.filter((e) => e.categoryId === ui.filterCat);
     if (q) {
@@ -806,10 +808,10 @@
       ${periodSelector()}
       <div class="toolbar">
         <div class="seg wide">
-          ${[['all', 'Todo'], ['expense', 'Gastos'], ['income', 'Ingresos'], ['personal', 'Por su cuenta']].map(([k, l]) => `<button data-type="${k}" class="${ui.filterType === k ? 'on' : ''}">${l}</button>`).join('')}
+          ${[['all', 'Todo'], ['expense', 'Gastos'], ['income', 'Ingresos'], ['withdrawal', 'Retiradas'], ['personal', 'Por su cuenta']].map(([k, l]) => `<button data-type="${k}" class="${ui.filterType === k ? 'on' : ''}">${l}</button>`).join('')}
         </div>
         <input class="search" type="search" placeholder="Buscar por nota, persona, categoría…" value="${esc(ui.search)}" aria-label="Buscar">
-        ${ui.filterType !== 'income' && chipCats.length ? `<div class="chips">
+        ${ui.filterType !== 'income' && ui.filterType !== 'withdrawal' && chipCats.length ? `<div class="chips">
           <button class="chip ${!ui.filterCat ? 'on' : ''}" data-filter="">Todas</button>
           ${chipCats.map((c) => `<button class="chip ${ui.filterCat === c.id ? 'on' : ''}" data-filter="${esc(c.id)}">${c.icon} ${esc(c.name)}</button>`).join('')}
         </div>` : ''}
@@ -834,10 +836,10 @@
       renderMovements();
       const s = $('.search', main); s.focus(); try { s.setSelectionRange(pos, pos); } catch (_) {}
     });
-    $$('[data-type]', main).forEach((b) => b.addEventListener('click', () => { ui.filterType = b.dataset.type; if (ui.filterType === 'income') ui.filterCat = ''; renderMovements(); }));
+    $$('[data-type]', main).forEach((b) => b.addEventListener('click', () => { ui.filterType = b.dataset.type; if (ui.filterType === 'income' || ui.filterType === 'withdrawal') ui.filterCat = ''; renderMovements(); }));
     $$('[data-filter]', main).forEach((b) => b.addEventListener('click', () => { ui.filterCat = b.dataset.filter; renderMovements(); }));
     const add = $('[data-act=add]', main);
-    if (add) add.onclick = () => (ui.filterType === 'income' ? openIncomeForm() : openExpenseForm(null, ui.filterCat));
+    if (add) add.onclick = () => (ui.filterType === 'income' ? openIncomeForm() : ui.filterType === 'withdrawal' ? openIncomeForm(null, '', 'withdrawal') : openExpenseForm(null, ui.filterCat));
   }
 
   function dayLabel(iso) {
@@ -919,7 +921,7 @@
         <h2>💾 Datos</h2>
         <p class="muted" style="margin-top:-6px">Los datos se guardan en la base de datos de la familia (Cloudflare D1) y se ven en todos vuestros dispositivos.</p>
         <div class="setting">
-          <div><div class="s-title">Copia de seguridad</div><div class="s-sub">${data.expenses.length} gastos · ${data.incomes.length} ingresos</div></div>
+          <div><div class="s-title">Copia de seguridad</div><div class="s-sub">${data.expenses.length} gastos · ${data.incomes.filter((i) => !isWithdrawal(i)).length} ingresos · ${data.incomes.filter(isWithdrawal).length} retiradas</div></div>
           <button class="btn" data-act="export">⬇️ Exportar</button>
         </div>
         <div class="setting">
@@ -1403,6 +1405,7 @@
   $('#fab-add').addEventListener('click', () => {
     if (ui.view === 'cuenta') return openIncomeForm();
     if (ui.view === 'movimientos' && ui.filterType === 'income') return openIncomeForm();
+    if (ui.view === 'movimientos' && ui.filterType === 'withdrawal') return openIncomeForm(null, '', 'withdrawal');
     openExpenseForm(null, ui.view === 'movimientos' ? ui.filterCat : '');
   });
   // al volver a la app, traer los cambios del resto de la familia

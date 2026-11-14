@@ -82,6 +82,10 @@ try {
   await ana.fill('#f-amount', '500'); await ana.fill('#f-note', 'Retirada e2e'); await ana.click('button[type=submit]'); await sleep(500);
   const wd = (await api(ana, 'GET', '/data')).body.incomes.find((i) => i.note === 'Retirada e2e');
   check('retirada personal guardada', wd && wd.kind === 'withdrawal' && wd.member_id === 'papa' && wd.amount === 50000);
+  await ana.click('.tab[data-view=movimientos]'); await ana.click('[data-type=withdrawal]'); await sleep(200);
+  check('filtro Retiradas muestra solo retiradas', (await ana.locator('[data-inc]').count()) >= 1 && (await ana.locator('[data-exp]').count()) === 0 && (await ana.locator('.row-title', { hasText: 'Aportación' }).count()) === 0);
+  await ana.click('[data-type=income]'); await sleep(200);
+  check('filtro Ingresos no muestra retiradas', (await ana.locator('.row-title', { hasText: 'Retirada personal' }).count()) === 0);
   check('retirada sin miembro rechazada', (await api(ana, 'PUT', '/incomes/wd2', { kind: 'withdrawal', amount: 100, date: '2026-01-01' })).status === 400);
 
   console.log('▶ Cuenta común');

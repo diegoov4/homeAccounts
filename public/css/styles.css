@@ -394,3 +394,7 @@ body.locked .tabbar { display: none; }
 .pct-bar i { display: block; height: 100%; border-radius: 99px; background: var(--good); }
 .pct-bar b { position: absolute; top: -3px; width: 3px; height: 14px; border-radius: 2px; background: var(--text); transform: translateX(-1px); }
 .flow-legend i.mark { width: 3px; height: 12px; border-radius: 2px; background: var(--text); }
+/* filtros de movimientos: cinco opciones, se desplazan en pantallas estrechas */
+.toolbar .seg.wide { overflow-x: auto; scrollbar-width: none; }
+.toolbar .seg.wide::-webkit-scrollbar { display: none; }
+.toolbar .seg.wide button { flex: 1 0 auto; padding: 8px 10px; white-space: nowrap; }
