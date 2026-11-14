@@ -2,6 +2,17 @@
   "_ayuda": "Reglas para clasificar movimientos del banco. Se busca cada palabra (sin mayúsculas ni tildes) dentro del concepto; gana la primera regla que coincida. 'category' es el id de la categoría en la app.",
   "categories": [
     {
+      "category": "ibi",
+      "match": [
+        "impuestos ayuntamiento",
+        "ayto madrid",
+        "ay. madrid",
+        "ayuntamiento de madrid",
+        "ibi ",
+        "impuesto bienes inmuebles"
+      ]
+    },
+    {
       "category": "comunidad",
       "match": [
         "c.p. ",
@@ -17,12 +28,8 @@
         "prestamo hipotecario",
         "cuota prestamo",
         "alquiler",
-        "ibi ",
-        "impuesto bienes inmuebles",
         "prestamos adeudo cuota",
-        "climatizacion",
-        "impuestos ayuntamiento",
-        "ayto madrid"
+        "climatizacion"
       ]
     },
     {
