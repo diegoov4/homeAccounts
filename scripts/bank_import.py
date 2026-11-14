@@ -230,6 +230,12 @@ def load_family_rules(target):
     return json.loads(rows[0]['value']) if rows else []
 
 
+def load_ignored(target):
+    """Ids de movimientos descartados a propósito (regularizaciones, cajero…): no se vuelven a proponer."""
+    rows = d1_query("SELECT value FROM settings WHERE key = 'import_ignored'", target)
+    return set(json.loads(rows[0]['value'])) if rows else set()
+
+
 def apply_family_rules(rows, rules):
     extras = []
     for r in list(rows):
@@ -347,6 +353,10 @@ def cmd_prepare(a):
     rows = prepare_rows(movs, a.account, a.member or '', a.common_hint or [], members, a.source or '')
     family_rules = load_family_rules(target)
     apply_family_rules(rows, family_rules)
+    ignored = load_ignored(target)
+    for r in rows:
+        if r['id'] in ignored:
+            r.update(tipo='ignorar', incluir='no', aviso='descartado antes')
     if family_rules:
         print(f'(aplicadas {len(family_rules)} reglas de la familia)')
     for r in rows:
@@ -461,12 +471,31 @@ def cmd_rules(a):
         print(f"  «{x['match']}» → {x['tipo']}" + (f" ({x['miembro']})" if x.get('miembro') else '') + (f" · {x['nota']}" if x.get('nota') else '') + (' · revisar' if x.get('revisar') else ''))
 
 
+def cmd_ignore(a):
+    """Añade ids (o las filas con incluir=no y tipo=ignorar de un CSV de revisión) a la lista de descartados."""
+    target = target_args(a)
+    ids = set(a.ids or [])
+    if a.review:
+        with open(a.review, newline='', encoding='utf-8-sig') as f:
+            ids |= {r['id'] for r in csv.DictReader(f, delimiter=';') if norm(r.get('tipo')) == 'ignorar'}
+    allids = sorted(load_ignored(target) | ids)
+    value = json.dumps(allids).replace("'", "''")
+    wrangler(['d1', 'execute', DB, *target, '--command',
+              f"INSERT INTO settings (key, value) VALUES ('import_ignored', '{value}') ON CONFLICT(key) DO UPDATE SET value = excluded.value"])
+    print(f'✅ {len(allids)} movimientos descartados guardados')
+
+
 def main():
     ap = argparse.ArgumentParser(description='Importa extractos del banco a Gastos de Casa')
     sub = ap.add_subparsers(dest='cmd', required=True)
     p = sub.add_parser('inspect'); p.add_argument('file')
     p = sub.add_parser('rules', help='ver o guardar las reglas propias de la familia (en D1)')
     p.add_argument('--set', help='archivo JSON con las reglas')
+    g = p.add_mutually_exclusive_group(required=True)
+    g.add_argument('--remote', action='store_true'); g.add_argument('--local', action='store_true')
+    p.add_argument('--persist-to')
+    p = sub.add_parser('ignore', help='marcar movimientos como descartados para siempre')
+    p.add_argument('--ids', nargs='*'); p.add_argument('--review', help='CSV de revisión: añade las filas con tipo=ignorar')
     g = p.add_mutually_exclusive_group(required=True)
     g.add_argument('--remote', action='store_true'); g.add_argument('--local', action='store_true')
     p.add_argument('--persist-to')
@@ -487,7 +516,7 @@ def main():
         g.add_argument('--local', action='store_true', help='base de datos local de pruebas')
         p.add_argument('--persist-to', help='carpeta de la D1 local')
     a = ap.parse_args()
-    {'inspect': cmd_inspect, 'prepare': cmd_prepare, 'apply': cmd_apply, 'rules': cmd_rules}[a.cmd](a)
+    {'inspect': cmd_inspect, 'prepare': cmd_prepare, 'apply': cmd_apply, 'rules': cmd_rules, 'ignore': cmd_ignore}[a.cmd](a)
 
 
 if __name__ == '__main__':
