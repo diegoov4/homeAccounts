@@ -387,3 +387,6 @@ body.locked .tabbar { display: none; }
 .tag.me-tag { background: var(--accent-soft); color: var(--accent); vertical-align: middle; }
 .warn-txt { color: var(--warn); }
 .amount.warn-txt { color: var(--warn); }
+.trend.flow.many .val { display: none; }
+.account-mini .row-top { flex-wrap: wrap; row-gap: 4px; }
+.account-mini .row-title { overflow: visible; }

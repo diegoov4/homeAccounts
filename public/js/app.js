@@ -256,12 +256,13 @@
   // Media de gastos de los últimos N meses completos (sin contar el actual) que tengan datos.
   function avgMonthlyExpenses(n = 3) {
     const totals = [];
+    const keys = [];
     for (let i = 1; i <= 12 && totals.length < n; i++) {
       const d = new Date(now.getFullYear(), now.getMonth() - i, 1);
       const list = inPeriod(data.expenses, periodKey('month', d.getFullYear(), d.getMonth()));
-      if (list.length) totals.push(sum(list));
+      if (list.length) { totals.push(sum(list)); keys.push(periodKey('month', d.getFullYear(), d.getMonth())); }
     }
-    return totals.length ? { avg: round2(totals.reduce((a, b) => a + b, 0) / totals.length), months: totals.length } : null;
+    return totals.length ? { avg: round2(totals.reduce((a, b) => a + b, 0) / totals.length), months: totals.length, keys } : null;
   }
 
   // ---------------------------------------------------------------- vistas
@@ -506,13 +507,13 @@
     cols.forEach((c) => { c.inc = netSum(inPeriod(data.incomes, c.key)); c.exp = sum(inPeriod(data.expenses, c.key)); });
     const max = Math.max(1, ...cols.map((c) => Math.max(c.inc, c.exp)));
     return `
-      <div class="trend flow">${cols.map((c) => `
+      <div class="trend flow ${cols.length > 6 ? 'many' : ''}">${cols.map((c) => `
         <div class="col ${c.on ? 'on' : ''}" title="${MONTHS[c.m]} ${c.y}: aportado ${money(c.inc)} · gastos ${money(c.exp)}">
           <span class="val ${c.inc && c.exp ? (c.inc >= c.exp ? 'good-txt' : 'over-txt') : ''}">${c.inc || c.exp ? (c.inc >= c.exp ? '+' : '−') + compact(Math.abs(c.inc - c.exp)) : ''}</span>
           <span class="pair"><span class="b inc" style="height:${(c.inc / max) * 100}%"></span><span class="b exp" style="height:${(c.exp / max) * 100}%"></span></span>
           <span class="m">${c.label}</span>
         </div>`).join('')}</div>
-      <div class="flow-legend"><span><i class="inc"></i>Aportado</span><span><i class="exp"></i>Gastos</span><span class="faint">arriba: lo que sobra o falta</span></div>`;
+      <div class="flow-legend"><span><i class="inc"></i>Aportado</span><span><i class="exp"></i>Gastos</span><span class="faint">${cols.length > 6 ? 'cifras en la vista por mes' : 'arriba: lo que sobra o falta'}</span></div>`;
   }
 
   // ---------- Cuenta común
@@ -551,17 +552,24 @@
     let recommend = '';
     if (avg) {
       const need = avg.avg;
-      const base = fixed > 0 ? data.members.map((m) => m.monthly / fixed) : data.members.map(() => 1 / data.members.length);
-      const ok = fixed >= need;
+      // reparto: aportaciones fijas si las hay; si no, la proporción real (neta) de los últimos meses
+      const real = data.members.map((m) => avg.keys.reduce((a, k) => a + netSum(inPeriod(data.incomes, k).filter((i) => i.memberId === m.id)), 0));
+      const realTotal = real.reduce((a, v) => a + Math.max(0, v), 0);
+      const mode = fixed > 0 ? 'fixed' : realTotal > 0 ? 'real' : 'equal';
+      const base = mode === 'fixed' ? data.members.map((m) => m.monthly / fixed)
+        : mode === 'real' ? real.map((v) => Math.max(0, v) / realTotal) : data.members.map(() => 1 / data.members.length);
+      const current = data.members.map((m, i) => (mode === 'fixed' ? m.monthly : real[i] / avg.months));
+      const currentTotal = mode === 'fixed' ? fixed : round2(current.reduce((a, v) => a + v, 0));
+      const ok = currentTotal >= need;
       recommend = `
         <section class="card">
           <h2>💡 ¿Cuánto deberíamos aportar?</h2>
-          <p class="muted" style="margin:-4px 0 12px">Gasto medio de la familia: <b>${money(need, { noCents: true })}/mes</b> (últimos ${avg.months} meses). Aportación fija actual: <b>${money(fixed, { noCents: true })}/mes</b>.</p>
+          <p class="muted" style="margin:-4px 0 12px">Gasto medio de la familia: <b>${money(need, { noCents: true })}/mes</b> (últimos ${avg.months} meses). ${mode === 'fixed' ? 'Aportación fija actual' : 'Aportación media real'}: <b>${money(currentTotal, { noCents: true })}/mes</b>.</p>
           ${ok
-            ? `<div class="notice good">✅ Vuestras aportaciones fijas cubren el gasto medio con un margen de ${money(fixed - need, { noCents: true })} al mes.</div>`
-            : `<div class="notice bad">⚠️ Faltan unos <b>${money(need - fixed, { noCents: true })} al mes</b>. Para cubrir el gasto medio, ${fixed > 0 ? 'manteniendo la proporción actual' : 'a partes iguales'}:</div>
+            ? `<div class="notice good">✅ Lo que aportáis cubre el gasto medio con un margen de ${money(currentTotal - need, { noCents: true })} al mes.</div>`
+            : `<div class="notice bad">⚠️ Faltan unos <b>${money(need - currentTotal, { noCents: true })} al mes</b>. Para cubrir el gasto medio, ${mode === 'equal' ? 'a partes iguales' : 'manteniendo la proporción actual'} (${data.members.map((m, i) => `${esc(m.name)} ${Math.round(base[i] * 100)} %`).join(' · ')}):</div>
                <div class="rows" style="margin-top:8px">${data.members.map((m, i) => `
-                 <div class="row static"><span class="avatar">${esc(m.name.slice(0, 1).toUpperCase())}</span><span class="row-main"><span class="row-top"><span class="row-title">${esc(m.name)}</span><span class="amount">${money(Math.ceil((need * base[i]) / 10) * 10, { noCents: true })}/mes</span></span><span class="row-sub">ahora ${money(m.monthly, { noCents: true })}/mes</span></span></div>`).join('')}</div>`}
+                 <div class="row static"><span class="avatar">${esc(m.name.slice(0, 1).toUpperCase())}</span><span class="row-main"><span class="row-top"><span class="row-title">${esc(m.name)}</span><span class="amount">${money(Math.ceil((need * base[i]) / 10) * 10, { noCents: true })}/mes</span></span><span class="row-sub">ahora ${money(current[i], { noCents: true })}/mes${mode === 'real' ? ' de media' : ''}</span></span></div>`).join('')}</div>`}
         </section>`;
     }
 
