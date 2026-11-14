@@ -390,3 +390,7 @@ body.locked .tabbar { display: none; }
 .trend.flow.many .val { display: none; }
 .account-mini .row-top { flex-wrap: wrap; row-gap: 4px; }
 .account-mini .row-title { overflow: visible; }
+.pct-bar { position: relative; display: block; height: 8px; border-radius: 99px; background: var(--surface-2); margin: 6px 0 3px; }
+.pct-bar i { display: block; height: 100%; border-radius: 99px; background: var(--good); }
+.pct-bar b { position: absolute; top: -3px; width: 3px; height: 14px; border-radius: 2px; background: var(--text); transform: translateX(-1px); }
+.flow-legend i.mark { width: 3px; height: 12px; border-radius: 2px; background: var(--text); }

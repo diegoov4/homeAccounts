@@ -87,6 +87,7 @@ function vMember(b, id) {
     name: vText(b.name, 30, 'nombre', { required: true }),
     email,
     monthly_contribution: vCents(b.monthly_contribution ?? 0, 'aportación', { allowZero: true }),
+    monthly_income: vCents(b.monthly_income ?? 0, 'ingresos', { allowZero: true }),
     sort: vInt(b.sort),
   };
 }
@@ -102,15 +103,15 @@ const UPSERT = {
   categories: `INSERT INTO categories (id, name, icon, color, grp, budget, sort)
                VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7)
                ON CONFLICT(id) DO UPDATE SET name=?2, icon=?3, color=?4, grp=?5, budget=?6, sort=?7`,
-  members: `INSERT INTO members (id, name, monthly_contribution, sort, email)
-            VALUES (?1, ?2, ?3, ?4, ?5)
-            ON CONFLICT(id) DO UPDATE SET name=?2, monthly_contribution=?3, sort=?4, email=?5`,
+  members: `INSERT INTO members (id, name, monthly_contribution, sort, email, monthly_income)
+            VALUES (?1, ?2, ?3, ?4, ?5, ?6)
+            ON CONFLICT(id) DO UPDATE SET name=?2, monthly_contribution=?3, sort=?4, email=?5, monthly_income=?6`,
 };
 const COLS = {
   expenses: ['id', 'amount', 'category_id', 'date', 'note', 'paid_by', 'reimbursed', 'created_at'],
   incomes: ['id', 'amount', 'member_id', 'date', 'note', 'created_at', 'kind'],
   categories: ['id', 'name', 'icon', 'color', 'grp', 'budget', 'sort'],
-  members: ['id', 'name', 'monthly_contribution', 'sort', 'email'],
+  members: ['id', 'name', 'monthly_contribution', 'sort', 'email', 'monthly_income'],
 };
 const VALIDATE = { expenses: vExpense, incomes: vIncome, categories: vCategory, members: vMember };
 const bindRow = (db, table, row) => db.prepare(UPSERT[table]).bind(...COLS[table].map((c) => row[c]));

@@ -51,13 +51,13 @@
     return {
       me: d.me || null,
       settings: { currency: d.settings?.currency || 'EUR', initialBalance: (d.settings?.initial_balance || 0) / 100 },
-      members: (d.members || []).map((m) => ({ id: m.id, name: m.name, email: m.email || '', monthly: m.monthly_contribution / 100, sort: m.sort })),
+      members: (d.members || []).map((m) => ({ id: m.id, name: m.name, email: m.email || '', monthly: m.monthly_contribution / 100, income: (m.monthly_income || 0) / 100, sort: m.sort })),
       categories: (d.categories || []).map((c) => ({ id: c.id, name: c.name, icon: c.icon, color: c.color, group: c.grp, budget: c.budget / 100, sort: c.sort })),
       expenses: (d.expenses || []).map((e) => ({ id: e.id, amount: e.amount / 100, categoryId: e.category_id, date: e.date, note: e.note, paidBy: e.paid_by || '', reimbursed: Boolean(e.reimbursed), createdAt: e.created_at })),
       incomes: (d.incomes || []).map((i) => ({ id: i.id, kind: i.kind === 'withdrawal' ? 'withdrawal' : 'income', amount: i.amount / 100, memberId: i.member_id || '', date: i.date, note: i.note, createdAt: i.created_at })),
     };
   }
-  const apiMember = (m) => ({ id: m.id, name: m.name, email: m.email || '', monthly_contribution: toCents(m.monthly || 0), sort: m.sort || 0 });
+  const apiMember = (m) => ({ id: m.id, name: m.name, email: m.email || '', monthly_contribution: toCents(m.monthly || 0), monthly_income: toCents(m.income || 0), sort: m.sort || 0 });
   const apiCategory = (c) => ({ id: c.id, name: c.name, icon: c.icon, color: c.color, grp: c.group, budget: toCents(c.budget || 0), sort: c.sort || 0 });
   const apiExpense = (e) => ({ id: e.id, amount: toCents(e.amount), category_id: e.categoryId, date: e.date, note: e.note, paid_by: e.paidBy || null, reimbursed: e.reimbursed ? 1 : 0, created_at: e.createdAt });
   const apiIncome = (i) => ({ id: i.id, kind: i.kind || 'income', amount: toCents(i.amount), member_id: i.memberId || null, date: i.date, note: i.note, created_at: i.createdAt });
@@ -555,22 +555,64 @@
       // reparto: aportaciones fijas si las hay; si no, la proporción real (neta) de los últimos meses
       const real = data.members.map((m) => avg.keys.reduce((a, k) => a + netSum(inPeriod(data.incomes, k).filter((i) => i.memberId === m.id)), 0));
       const realTotal = real.reduce((a, v) => a + Math.max(0, v), 0);
-      const mode = fixed > 0 ? 'fixed' : realTotal > 0 ? 'real' : 'equal';
-      const base = mode === 'fixed' ? data.members.map((m) => m.monthly / fixed)
+      const incomeTotal = data.members.reduce((a, m) => a + (m.income || 0), 0);
+      const byIncome = data.members.every((m) => m.income > 0);
+      const mode = byIncome ? 'income' : fixed > 0 ? 'fixed' : realTotal > 0 ? 'real' : 'equal';
+      const base = mode === 'income' ? data.members.map((m) => m.income / incomeTotal)
+        : mode === 'fixed' ? data.members.map((m) => m.monthly / fixed)
         : mode === 'real' ? real.map((v) => Math.max(0, v) / realTotal) : data.members.map(() => 1 / data.members.length);
       const current = data.members.map((m, i) => (mode === 'fixed' ? m.monthly : real[i] / avg.months));
+      const pctNeed = mode === 'income' ? need / incomeTotal : 0;
       const currentTotal = mode === 'fixed' ? fixed : round2(current.reduce((a, v) => a + v, 0));
       const ok = currentTotal >= need;
       recommend = `
         <section class="card">
           <h2>💡 ¿Cuánto deberíamos aportar?</h2>
           <p class="muted" style="margin:-4px 0 12px">Gasto medio de la familia: <b>${money(need, { noCents: true })}/mes</b> (últimos ${avg.months} meses). ${mode === 'fixed' ? 'Aportación fija actual' : 'Aportación media real'}: <b>${money(currentTotal, { noCents: true })}/mes</b>.</p>
-          ${ok
+          ${mode === 'income'
+            ? `<div class="notice ${ok ? 'good' : 'bad'}">${ok ? `✅ Lo que aportáis cubre el gasto medio (margen de ${money(currentTotal - need, { noCents: true })} al mes).` : `⚠️ Faltan unos <b>${money(need - currentTotal, { noCents: true })} al mes</b>.`} Para cubrir el gasto medio aportando los dos el mismo porcentaje, cada uno debería poner el <b>${Math.round(pctNeed * 100)} % de sus ingresos</b>:</div>
+               <div class="rows" style="margin-top:8px">${data.members.map((m, i) => `
+                 <div class="row static"><span class="avatar">${esc(m.name.slice(0, 1).toUpperCase())}</span><span class="row-main"><span class="row-top"><span class="row-title">${esc(m.name)}</span><span class="amount">${money(Math.ceil((need * base[i]) / 10) * 10, { noCents: true })}/mes</span></span><span class="row-sub">${Math.round(pctNeed * 100)} % de ${money(m.income, { noCents: true })} · ahora ${money(current[i], { noCents: true })}/mes (${Math.round((current[i] / m.income) * 100)} %)</span></span></div>`).join('')}</div>`
+            : ok
             ? `<div class="notice good">✅ Lo que aportáis cubre el gasto medio con un margen de ${money(currentTotal - need, { noCents: true })} al mes.</div>`
             : `<div class="notice bad">⚠️ Faltan unos <b>${money(need - currentTotal, { noCents: true })} al mes</b>. Para cubrir el gasto medio, ${mode === 'equal' ? 'a partes iguales' : 'manteniendo la proporción actual'} (${data.members.map((m, i) => `${esc(m.name)} ${Math.round(base[i] * 100)} %`).join(' · ')}):</div>
                <div class="rows" style="margin-top:8px">${data.members.map((m, i) => `
                  <div class="row static"><span class="avatar">${esc(m.name.slice(0, 1).toUpperCase())}</span><span class="row-main"><span class="row-top"><span class="row-title">${esc(m.name)}</span><span class="amount">${money(Math.ceil((need * base[i]) / 10) * 10, { noCents: true })}/mes</span></span><span class="row-sub">ahora ${money(current[i], { noCents: true })}/mes${mode === 'real' ? ' de media' : ''}</span></span></div>`).join('')}</div>`}
         </section>`;
+    }
+
+    // ¿Aportáis el mismo % de vuestros ingresos? (ingresos mensuales × meses del periodo)
+    let fairCard = '';
+    if (data.members.length > 1 && data.members.every((m) => m.income > 0)) {
+      // en el año en curso solo se cuentan los meses ya terminados (el actual aún no ha cobrado todo el mundo)
+      const partialYear = ui.mode === 'year' && ui.year === now.getFullYear() && now.getMonth() > 0;
+      const months = ui.mode === 'month' ? 1 : partialYear ? now.getMonth() : 12;
+      const upTo = partialYear ? periodKey('month', now.getFullYear(), now.getMonth()) : null;
+      const incs = inPeriod(data.incomes, periodKey()).filter((i) => !upTo || i.date < upTo);
+      const rows = s.members.map((x) => ({ m: x.m, contrib: netSum(incs.filter((i) => i.memberId === x.m.id)), inc: x.m.income * months }));
+      const totInc = rows.reduce((a, r) => a + r.inc, 0);
+      const totContrib = rows.reduce((a, r) => a + r.contrib, 0);
+      const p = totInc ? totContrib / totInc : 0;
+      rows.forEach((r) => { r.pct = r.inc ? r.contrib / r.inc : 0; r.fair = p * r.inc; r.gap = round2(r.contrib - r.fair); });
+      const spread = Math.max(...rows.map((r) => r.pct)) - Math.min(...rows.map((r) => r.pct));
+      const maxPct = Math.max(0.01, ...rows.map((r) => r.pct), p);
+      fairCard = `
+      <section class="card">
+        <h2>⚖️ ¿Aportáis el mismo %? <span class="muted">${esc(periodLabel())}</span></h2>
+        <p class="muted" style="margin:-4px 0 12px">Lo que pone cada uno en la cuenta común (neto) respecto a sus ingresos${partialYear ? ` de enero a ${MONTHS[now.getMonth() - 1]}` : months > 1 ? ` de ${months} meses` : ''}. Entre los dos aportáis el <b>${Math.round(p * 100)} %</b>.</p>
+        <div class="rows">${rows.map((r) => `
+          <div class="row static">
+            <span class="avatar">${esc(r.m.name.slice(0, 1).toUpperCase())}</span>
+            <span class="row-main">
+              <span class="row-top"><span class="row-title">${esc(r.m.name)}</span><span class="amount">${Math.round(r.pct * 100)} %</span></span>
+              <span class="pct-bar"><i style="width:${(Math.max(0, r.pct) / maxPct) * 100}%"></i><b style="left:${(p / maxPct) * 100}%"></b></span>
+              <span class="row-meta"><span>${money(r.contrib, { noCents: true })} de ${money(r.inc, { noCents: true })}</span><span class="${Math.abs(r.gap) < 1 ? '' : r.gap > 0 ? 'good-txt' : 'warn-txt'}">${Math.abs(r.gap) < 1 ? 'justo' : r.gap > 0 ? `+${money(r.gap, { noCents: true })} de más` : `${money(-r.gap, { noCents: true })} de menos`}</span></span>
+            </span>
+          </div>`).join('')}</div>
+        <div class="notice ${spread <= 0.03 ? 'good' : 'bad'}" style="margin-top:10px">${spread <= 0.03 ? '✅ Estáis aportando prácticamente el mismo % de vuestros ingresos.' : `Para aportar el mismo % (${Math.round(p * 100)} %) con el mismo total, ${rows.filter((r) => r.gap < 0).map((r) => `${esc(r.m.name)} debería poner ${money(-r.gap, { noCents: true })} más`).join(' y ')}${rows.some((r) => r.gap > 0) ? ` y ${rows.filter((r) => r.gap > 0).map((r) => `${esc(r.m.name)} ${money(r.gap, { noCents: true })} menos`).join(' y ')}` : ''}.`}</div>
+        <div class="flow-legend"><span><i class="inc"></i>% de sus ingresos que aporta</span><span><i class="mark"></i>% común (objetivo)</span></div>
+        ${ui.mode === 'month' ? '<p class="faint" style="font-size:12px;margin:8px 0 0">En un solo mes, una aportación hecha a principios del mes siguiente desplaza el resultado. Para una visión fiel, mira el año.</p>' : ''}
+      </section>`;
     }
 
     const maxMember = Math.max(1, ...s.members.map((x) => Math.max(0, x.contrib) + x.personal));
@@ -636,6 +678,7 @@
         <div class="flow-legend"><span><i class="inc"></i>Aportado a la cuenta (neto de retiradas)</span><span><i class="per"></i>Pagado por su cuenta (sin devolver)</span></div>
       </section>
 
+      ${fairCard}
       ${recommend}
 
       <section class="card">
@@ -806,7 +849,7 @@
           ${data.members.map((m) => `
             <button class="row" data-member="${esc(m.id)}">
               <span class="avatar">${esc(m.name.slice(0, 1).toUpperCase())}</span>
-              <span class="row-main"><span class="row-top"><span class="row-title">${esc(m.name)}${isMe(m) ? ' <span class="tag me-tag">Tú</span>' : ''}</span><span class="amount">${m.monthly ? money(m.monthly, { noCents: true }) + '/mes' : '<span class="faint">sin aportación fija</span>'}</span></span><span class="row-sub">${m.email ? '🔑 ' + esc(m.email) : 'Sin acceso a la app'}</span></span>
+              <span class="row-main"><span class="row-top"><span class="row-title">${esc(m.name)}${isMe(m) ? ' <span class="tag me-tag">Tú</span>' : ''}</span><span class="amount">${m.monthly ? money(m.monthly, { noCents: true }) + '/mes' : '<span class="faint">sin aportación fija</span>'}</span></span><span class="row-sub">${m.income ? `Ingresos ${money(m.income, { noCents: true })}/mes · ` : ''}${m.email ? '🔑 ' + esc(m.email) : 'Sin acceso a la app'}</span></span>
             </button>`).join('') || '<p class="faint">Aún no hay miembros.</p>'}
         </div>
         <button class="btn block" data-act="new-member" style="margin-top:8px">➕ Añadir miembro</button>
@@ -1090,6 +1133,11 @@
           <p class="faint" style="font-size:13px;margin:6px 0 0">Con su email podrá entrar en la app con su cuenta de Google.</p>
         </div>
         <div class="field">
+          <label for="m-income">Ingresos netos al mes</label>
+          <input class="input" id="m-income" inputmode="decimal" placeholder="Ej.: nómina neta (opcional)" value="${member && member.income ? String(member.income).replace('.', ',') : ''}">
+          <p class="faint" style="font-size:13px;margin:6px 0 0">Para comprobar que aportáis el mismo % de lo que cobra cada uno. Si hay pagas extra, pon la media mensual.</p>
+        </div>
+        <div class="field">
           <label for="m-monthly">Aportación fija mensual a la cuenta común</label>
           <input class="input" id="m-monthly" inputmode="decimal" placeholder="0,00 (opcional)" value="${member && member.monthly ? String(member.monthly).replace('.', ',') : ''}">
           <p class="faint" style="font-size:13px;margin:6px 0 0">Se usa para registrar las aportaciones del mes con un toque y para calcular si es suficiente.</p>
@@ -1120,7 +1168,10 @@
         if (email && !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) return toast('Email no válido');
         if (email && data.members.some((m) => m.email === email && m.id !== (member && member.id))) return toast('Ese email ya es de otro miembro');
         if (member && isMe(member) && member.email && email !== member.email && !confirm('Vas a cambiar tu propio email. Si no estás en la lista de emails autorizados del servidor, perderás el acceso. ¿Continuar?')) return;
-        const item = { id: member ? member.id : uid(), name, email, monthly, sort: member ? member.sort : data.members.length };
+        const rawInc = $('#m-income', root).value.trim();
+        const income = rawInc ? parseAmount(rawInc) : 0;
+        if (Number.isNaN(income) || income < 0) return toast('Ingresos no válidos');
+        const item = { id: member ? member.id : uid(), name, email, monthly, income, sort: member ? member.sort : data.members.length };
         closeSheet();
         persist(() => { if (editing) Object.assign(member, item); else data.members.push(item); }, () => api('PUT', '/members/' + item.id, apiMember(item)))
           .then((ok) => ok && toast(editing ? 'Guardado' : `👤 ${name} añadido`));
