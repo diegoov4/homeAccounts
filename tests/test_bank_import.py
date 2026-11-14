@@ -48,6 +48,21 @@ class Parsing(unittest.TestCase):
         again = b.prepare_rows(movs, 'personal', 'mama', ['ES99 9999'], [])
         self.assertEqual([r['id'] for r in rows], [r['id'] for r in again])  # ids estables → reimportar no duplica
 
+    def test_ids_with_source(self):
+        m = {'date': dt.date(2026, 11, 12), 'amount': -203.0, 'concept': 'SEGUROS MAPFRE VIDA'}
+        a = b.prepare_rows([m], 'comun', '', [], [], 'sabadell')[0]['id']
+        self.assertTrue(a.startswith('bksab'))
+        self.assertEqual(a, b.prepare_rows([m], 'comun', '', [], [], 'sabadell')[0]['id'])
+        self.assertNotEqual(a, b.prepare_rows([m], 'comun', '', [], [], 'santander')[0]['id'])
+
+    def test_family_rules(self):
+        rows = b.prepare_rows([{'date': dt.date(2026, 10, 26), 'amount': 2231.23, 'concept': 'NOMINA AVVALE ESPANA'},
+                               {'date': dt.date(2026, 10, 27), 'amount': -538.8, 'concept': 'TRANSFERENCIA A DIEGO MARTIN'}], 'comun', '', [], [])
+        b.apply_family_rules(rows, [{'match': 'nomina avvale', 'tipo': 'aportacion', 'miembro': 'diego'},
+                                    {'match': 'transferencia a diego martin', 'tipo': 'retirada', 'miembro': 'diego', 'revisar': True}])
+        self.assertEqual((rows[0]['tipo'], rows[0]['miembro'], rows[0]['incluir']), ('aportacion', 'diego', 'si'))
+        self.assertEqual((rows[1]['tipo'], rows[1]['incluir']), ('retirada', 'no'))
+
     def test_cross_file_duplicates(self):
         rows = b.prepare_rows([{'date': dt.date(2026, 10, 2), 'amount': 1200, 'concept': 'TRANSFERENCIA DE MAMA'}],
                               'comun', '', [], [{'id': 'mama', 'name': 'Mamá'}])

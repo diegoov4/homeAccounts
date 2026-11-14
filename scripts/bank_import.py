@@ -214,12 +214,41 @@ def classify_category(concept):
     return ''
 
 
-def stable_id(account, member, m, n):
+def stable_id(account, member, m, n, source=''):
+    """Id fijo por movimiento: reimportar el mismo extracto no duplica. `source` (sabadell, santander…)
+    distingue extractos de bancos distintos."""
     key = f"{account}|{member}|{m['date']}|{m['amount']:.2f}|{norm(m['concept'])}|{n}"
-    return 'bk' + hashlib.sha1(key.encode()).hexdigest()[:20]
+    return 'bk' + norm(source)[:3] + hashlib.sha1(key.encode()).hexdigest()[:20]
 
 
-def prepare_rows(movs, account, member, common_hints, members):
+def load_family_rules(target):
+    """Reglas propias de la familia (nombres, nóminas, planes de ahorro…), guardadas en D1 y no en el repositorio.
+    Formato: [{"match": "texto", "tipo": "aportacion|retirada|gasto|ingreso|ignorar", "miembro": "id",
+               "categoria": "id", "nota": "...", "devuelto": "si", "revisar": true}]"""
+    rows = d1_query("SELECT value FROM settings WHERE key = 'import_rules'", target)
+    return json.loads(rows[0]['value']) if rows else []
+
+
+def apply_family_rules(rows, rules):
+    for r in rows:
+        c = norm(r['concepto_banco'])
+        rule = next((x for x in rules if norm(x['match']) in c), None)
+        if not rule:
+            continue
+        r.update(tipo=rule['tipo'], miembro=rule.get('miembro', ''), incluir='si', aviso='', devuelto=rule.get('devuelto', 'no'))
+        if rule.get('categoria'):
+            r['categoria'] = rule['categoria']
+        elif rule['tipo'] == 'gasto':
+            r['categoria'] = classify_category(r['concepto_banco']) or 'otros'
+        else:
+            r['categoria'] = ''
+        if rule.get('nota'):
+            r['nota'] = rule['nota']
+        if rule.get('revisar'):
+            r.update(incluir='no', aviso=f"revisar: {rule.get('nota') or rule['match']}")
+
+
+def prepare_rows(movs, account, member, common_hints, members, source=''):
     seen, rows = {}, []
     hints = [norm(h) for h in common_hints if h.strip()]
     for m in movs:
@@ -228,7 +257,7 @@ def prepare_rows(movs, account, member, common_hints, members):
         seen[k] = seen.get(k, 0) + 1
         row = {'incluir': 'si', 'tipo': '', 'fecha': m['date'].isoformat(), 'importe': f"{abs(m['amount']):.2f}",
                'categoria': '', 'miembro': '', 'devuelto': 'no', 'nota': m['concept'][:120], 'concepto_banco': m['concept'],
-               'aviso': '', 'id': stable_id(account, member, m, seen[k])}
+               'aviso': '', 'id': stable_id(account, member, m, seen[k], source)}
         is_transfer = any(norm(t) in c for t in RULES['transfer_keywords'])
         to_common = bool(hints) and any(h in c for h in hints)
         if any(norm(t) in c for t in RULES['ignore_keywords']):
@@ -275,9 +304,7 @@ def mark_duplicates(rows, existing_exp, existing_inc, days=3):
             continue
         if r['incluir'] != 'si' or r['tipo'] == 'ignorar':
             continue
-        if r['tipo'] == 'retirada':
-            continue
-        kind = 'gasto' if r['tipo'] == 'gasto' else 'ingreso'
+        kind = 'gasto' if r['tipo'] == 'gasto' else 'ingreso'  # aportaciones, ingresos y retiradas están en incomes
         d, cents, who = parse_date(r['fecha']), round(float(r['importe']) * 100), r['miembro']
         match = next((x for x in pool[kind] if x[1] == cents and abs((x[0] - d).days) <= days and (kind == 'gasto' or not who or not x[2] or x[2] == who)), None)
         if match:
@@ -307,7 +334,11 @@ def cmd_prepare(a):
         raise SystemExit(f"❌ El miembro '{a.member}' no existe. Miembros: " + ', '.join(f"{m['id']} ({m['name']})" for m in members))
     if a.account == 'personal' and not a.member:
         raise SystemExit('❌ Para una cuenta personal indica de quién es con --member')
-    rows = prepare_rows(movs, a.account, a.member, a.common_hint or [], members)
+    rows = prepare_rows(movs, a.account, a.member or '', a.common_hint or [], members, a.source or '')
+    family_rules = load_family_rules(target)
+    apply_family_rules(rows, family_rules)
+    if family_rules:
+        print(f'(aplicadas {len(family_rules)} reglas de la familia)')
     for r in rows:
         if r['categoria'] and r['categoria'] not in cats:
             r['categoria'] = 'otros'
@@ -405,10 +436,30 @@ def cmd_apply(a):
     print(f'✅ Importados {len(stmts)} movimientos (los ya existentes se han saltado).')
 
 
+def cmd_rules(a):
+    target = target_args(a)
+    if a.set:
+        rules = json.loads(Path(a.set).read_text(encoding='utf-8'))
+        for x in rules:
+            if not x.get('match') or x.get('tipo') not in TIPOS:
+                raise SystemExit(f'❌ Regla no válida: {x}')
+        value = json.dumps(rules, ensure_ascii=False).replace("'", "''")
+        wrangler(['d1', 'execute', DB, *target, '--command',
+                  f"INSERT INTO settings (key, value) VALUES ('import_rules', '{value}') ON CONFLICT(key) DO UPDATE SET value = excluded.value"])
+        print(f'✅ Guardadas {len(rules)} reglas de la familia')
+    for x in load_family_rules(target):
+        print(f"  «{x['match']}» → {x['tipo']}" + (f" ({x['miembro']})" if x.get('miembro') else '') + (f" · {x['nota']}" if x.get('nota') else '') + (' · revisar' if x.get('revisar') else ''))
+
+
 def main():
     ap = argparse.ArgumentParser(description='Importa extractos del banco a Gastos de Casa')
     sub = ap.add_subparsers(dest='cmd', required=True)
     p = sub.add_parser('inspect'); p.add_argument('file')
+    p = sub.add_parser('rules', help='ver o guardar las reglas propias de la familia (en D1)')
+    p.add_argument('--set', help='archivo JSON con las reglas')
+    g = p.add_mutually_exclusive_group(required=True)
+    g.add_argument('--remote', action='store_true'); g.add_argument('--local', action='store_true')
+    p.add_argument('--persist-to')
     for name in ('prepare', 'apply'):
         p = sub.add_parser(name)
         if name == 'prepare':
@@ -417,6 +468,7 @@ def main():
             p.add_argument('--member', help='id del miembro (mama, papa…) dueño de la cuenta personal')
             p.add_argument('--common-hint', action='append', help='texto que identifica la cuenta común en el concepto (IBAN, nombre…)')
             p.add_argument('--out')
+            p.add_argument('--source', help='nombre corto del extracto (sabadell, santander, begona…) para sus ids')
         else:
             p.add_argument('review')
             p.add_argument('--dry-run', action='store_true')
@@ -425,7 +477,7 @@ def main():
         g.add_argument('--local', action='store_true', help='base de datos local de pruebas')
         p.add_argument('--persist-to', help='carpeta de la D1 local')
     a = ap.parse_args()
-    {'inspect': cmd_inspect, 'prepare': cmd_prepare, 'apply': cmd_apply}[a.cmd](a)
+    {'inspect': cmd_inspect, 'prepare': cmd_prepare, 'apply': cmd_apply, 'rules': cmd_rules}[a.cmd](a)
 
 
 if __name__ == '__main__':
